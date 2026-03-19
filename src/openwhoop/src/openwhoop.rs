@@ -6,6 +6,7 @@ use openwhoop_codec::{
     Activity, HistoryReading, WhoopData, WhoopPacket,
     constants::{CMD_FROM_STRAP, DATA_FROM_STRAP, MetadataType},
 };
+use tokio::task::JoinHandle;
 
 use crate::{
     algo::{
@@ -15,12 +16,23 @@ use crate::{
     types::activities,
 };
 
+const MAX_PENDING_HISTORY_WRITES: usize = 8;
+const PACKET_SOF: u8 = 0xAA;
+
+struct HistoryWriteSummary {
+    count: usize,
+    last_time: Option<String>,
+}
+
 pub struct OpenWhoop {
     pub database: DatabaseHandler,
     pub user_age: Option<u8>,
-    pub packet: Option<WhoopPacket>,
+    pub packet_buffer: Vec<u8>,
     pub last_history_packet: Option<HistoryReading>,
     pub history_packets: Vec<HistoryReading>,
+    pending_history_writes: Vec<JoinHandle<anyhow::Result<HistoryWriteSummary>>>,
+    history_readings_seen_total: usize,
+    history_readings_saved_total: usize,
 }
 
 impl OpenWhoop {
@@ -33,10 +45,111 @@ impl OpenWhoop {
         Self {
             database,
             user_age,
-            packet: None,
+            packet_buffer: Vec::new(),
             last_history_packet: None,
             history_packets: Vec::new(),
+            pending_history_writes: Vec::new(),
+            history_readings_seen_total: 0,
+            history_readings_saved_total: 0,
         }
+    }
+
+    fn format_history_time(unix: u64) -> Option<String> {
+        DateTime::from_timestamp_millis(i64::try_from(unix).ok()?)
+            .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string())
+    }
+
+    fn next_buffered_packet(&mut self) -> anyhow::Result<Option<WhoopPacket>> {
+        if let Some(offset) = self.packet_buffer.iter().position(|byte| *byte == PACKET_SOF) {
+            if offset > 0 {
+                self.packet_buffer.drain(..offset);
+            }
+        } else {
+            self.packet_buffer.clear();
+            return Ok(None);
+        }
+
+        if self.packet_buffer.len() < 4 {
+            return Ok(None);
+        }
+
+        let frame_len = usize::from(u16::from_le_bytes([
+            self.packet_buffer[1],
+            self.packet_buffer[2],
+        ]));
+
+        if frame_len < 8 {
+            self.packet_buffer.drain(..1);
+            return Ok(None);
+        }
+
+        let total_len = 4 + frame_len;
+        if self.packet_buffer.len() < total_len {
+            return Ok(None);
+        }
+
+        let bytes = self.packet_buffer.drain(..total_len).collect::<Vec<_>>();
+        Ok(Some(WhoopPacket::from_data(bytes)?))
+    }
+
+    async fn queue_history_write(&mut self, readings: Vec<HistoryReading>) -> anyhow::Result<()> {
+        if readings.is_empty() {
+            return Ok(());
+        }
+
+        let count = readings.len();
+        let last_time = readings.last().and_then(|reading| Self::format_history_time(reading.unix));
+        let database = self.database.clone();
+
+        self.pending_history_writes.push(tokio::spawn(async move {
+            database.create_readings(readings).await?;
+            Ok(HistoryWriteSummary { count, last_time })
+        }));
+
+        if self.pending_history_writes.len() >= MAX_PENDING_HISTORY_WRITES {
+            self.flush_oldest_history_write().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn flush_oldest_history_write(&mut self) -> anyhow::Result<()> {
+        if self.pending_history_writes.is_empty() {
+            return Ok(());
+        }
+
+        let write = self.pending_history_writes.remove(0);
+        let summary = write.await??;
+
+        self.history_readings_saved_total += summary.count;
+        if self.history_readings_saved_total % 1000 < summary.count {
+            if let Some(last_time) = summary.last_time {
+                info!(
+                    "Saved {} history readings so far, latest saved time: {}",
+                    self.history_readings_saved_total,
+                    last_time
+                );
+            } else {
+                info!("Saved {} history readings so far", self.history_readings_saved_total);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn flush_pending_history_writes(&mut self) -> anyhow::Result<()> {
+        while !self.pending_history_writes.is_empty() {
+            self.flush_oldest_history_write().await?;
+        }
+
+        if self.history_readings_saved_total > 0 {
+            info!(
+                "Finished saving {} history readings",
+                self.history_readings_saved_total
+            );
+        }
+
+        Ok(())
     }
 
     pub async fn store_packet(
@@ -57,31 +170,20 @@ impl OpenWhoop {
     ) -> anyhow::Result<Option<WhoopPacket>> {
         let data = match packet.uuid {
             DATA_FROM_STRAP => {
-                let packet = if let Some(mut whoop_packet) = self.packet.take() {
-                    // TODO: maybe not needed but it would be nice to handle packet length here
-                    // so if next packet contains end of one and start of another it is handled
+                self.packet_buffer.extend_from_slice(&packet.bytes);
 
-                    whoop_packet.data.extend_from_slice(&packet.bytes);
+                let mut response = None;
+                while let Some(packet) = self.next_buffered_packet()? {
+                    let Ok(data) = WhoopData::from_packet(packet) else {
+                        continue;
+                    };
 
-                    if whoop_packet.data.len() + 3 >= whoop_packet.size {
-                        whoop_packet
-                    } else {
-                        self.packet = Some(whoop_packet);
-                        return Ok(None);
+                    if let Some(next_response) = self.handle_data(data).await? {
+                        response = Some(next_response);
                     }
-                } else {
-                    let packet = WhoopPacket::from_data(packet.bytes)?;
-                    if packet.partial {
-                        self.packet = Some(packet);
-                        return Ok(None);
-                    }
-                    packet
-                };
+                }
 
-                let Ok(data) = WhoopData::from_packet(packet) else {
-                    return Ok(None);
-                };
-                data
+                return Ok(response);
             }
             CMD_FROM_STRAP => {
                 let packet = WhoopPacket::from_data(packet.bytes)?;
@@ -112,15 +214,17 @@ impl OpenWhoop {
                     self.last_history_packet = Some(hr.clone());
                 }
 
-                let ptime = DateTime::from_timestamp_millis(i64::try_from(hr.unix)?)
-                    .unwrap()
-                    .with_timezone(&Local)
-                    .format("%Y-%m-%d %H:%M:%S");
-
                 self.history_packets.push(hr);
+                self.history_readings_seen_total += 1;
 
-                let packet_count = self.history_packets.len();
+                let packet_count = self.history_readings_seen_total;
                 if packet_count % 300 == 0 {
+                    let ptime = self
+                        .history_packets
+                        .last()
+                        .and_then(|p| Self::format_history_time(p.unix))
+                        .unwrap_or_else(|| "unknown".to_string());
+
                     if self
                         .history_packets
                         .last()
@@ -148,34 +252,11 @@ impl OpenWhoop {
                     info!("WHOOP history sync marked complete by device");
                 }
                 MetadataType::HistoryStart => {
-                    info!("WHOOP history transfer started");
+                    debug!("WHOOP history transfer started");
                 }
                 MetadataType::HistoryEnd => {
-                    let readings = self.history_packets.len();
-                    let first_ts = self.history_packets.first().and_then(|p| {
-                        DateTime::from_timestamp_millis(i64::try_from(p.unix).ok()?)
-                    });
-                    let last_ts = self.history_packets.last().and_then(|p| {
-                        DateTime::from_timestamp_millis(i64::try_from(p.unix).ok()?)
-                    });
-
-                    self.database
-                        .create_readings(std::mem::take(&mut self.history_packets))
-                        .await?;
-
-                    match (first_ts, last_ts) {
-                        (Some(first), Some(last)) => {
-                            info!(
-                                "Saved {} history readings ({} -> {})",
-                                readings,
-                                first.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S"),
-                                last.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S")
-                            );
-                        }
-                        _ => {
-                            info!("Saved {} history readings", readings);
-                        }
-                    }
+                    let readings = std::mem::take(&mut self.history_packets);
+                    self.queue_history_write(readings).await?;
 
                     let packet = WhoopPacket::history_end(data);
                     return Ok(Some(packet));
@@ -419,5 +500,41 @@ fn map_sleep_cycle(sleep: openwhoop_entities::sleep_cycles::Model) -> SleepCycle
         score: sleep
             .score
             .unwrap_or_else(|| SleepCycle::sleep_score(sleep.start, sleep.end)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openwhoop_codec::constants::PacketType;
+
+    #[test]
+    fn buffered_packet_reader_handles_split_and_concatenated_frames() {
+        let database = DatabaseHandler::new("sqlite::memory:");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let database = rt.block_on(database);
+        let mut whoop = OpenWhoop::new(database);
+
+        let first = WhoopPacket::new(PacketType::HistoricalData, 1, 0, vec![0; 8])
+            .framed_packet()
+            .unwrap();
+        let second = WhoopPacket::new(PacketType::HistoricalData, 2, 0, vec![1; 8])
+            .framed_packet()
+            .unwrap();
+
+        let split = first.len() - 3;
+        whoop.packet_buffer.extend_from_slice(&first[..split]);
+        assert!(whoop.next_buffered_packet().unwrap().is_none());
+
+        whoop.packet_buffer.extend_from_slice(&first[split..]);
+        whoop.packet_buffer.extend_from_slice(&second);
+
+        let packet = whoop.next_buffered_packet().unwrap().unwrap();
+        assert_eq!(packet.seq, 1);
+
+        let packet = whoop.next_buffered_packet().unwrap().unwrap();
+        assert_eq!(packet.seq, 2);
+
+        assert!(whoop.next_buffered_packet().unwrap().is_none());
     }
 }

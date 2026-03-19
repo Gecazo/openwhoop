@@ -50,7 +50,7 @@ impl WhoopDevice {
         self.peripheral.connect().await?;
         let _ = self.adapter.stop_scan().await;
         self.peripheral.discover_services().await?;
-        self.whoop.packet = None;
+        self.whoop.packet_buffer.clear();
         Ok(())
     }
 
@@ -146,6 +146,8 @@ impl WhoopDevice {
                 }
             }
         }
+
+        self.whoop.flush_pending_history_writes().await?;
 
         info!("History sync loop finished");
         Ok(())

@@ -3,7 +3,7 @@ use openwhoop_entities::{packets, sleep_cycles};
 use openwhoop_migration::{Migrator, MigratorTrait, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, ConnectOptions, Database,
-    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -116,6 +116,8 @@ impl DatabaseHandler {
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
 
+        let tx = self.db.begin().await?;
+
         // SQLite limits to 999 SQL variables per statement.
         // heart_rate has 11 columns, so max 90 rows per batch.
         for chunk in payloads.chunks(90) {
@@ -127,9 +129,11 @@ impl DatabaseHandler {
                         .update_column(openwhoop_entities::heart_rate::Column::SensorData)
                         .to_owned(),
                 )
-                .exec(&self.db)
+                .exec(&tx)
                 .await?;
         }
+
+        tx.commit().await?;
 
         Ok(())
     }
