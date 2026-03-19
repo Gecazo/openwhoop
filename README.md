@@ -61,12 +61,15 @@ Configuration is done through environment variables or a `.env` file.
 |----------|-------------|----------|
 | `DATABASE_URL` | Database connection string (SQLite or PostgreSQL) | Yes |
 | `WHOOP` | Device identifier (MAC address on Linux, name on macOS) | For device commands |
+| `WHOOP_AGE` | Optional age in years for age-adjusted sleep scoring | No |
 | `REMOTE` | Remote database URL for `sync` command | For sync |
 | `BLE_INTERFACE` | BLE adapter to use, e.g. `"hci1 (usb:Something)"` (Linux only) | No |
 | `DEBUG_PACKETS` | Set to `true` to store raw packets in database | No |
 | `RUST_LOG` | Logging level (default: `info`) | No |
 | `WHOOP_EMAIL` | WHOOP account email for `download-firmware` | For firmware |
 | `WHOOP_PASSWORD` | WHOOP account password for `download-firmware` | For firmware |
+
+`WHOOP_AGE` helps normalize sleep score HR/HRV components for different age ranges.
 
 ### Database URLs
 

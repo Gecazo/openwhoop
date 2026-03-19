@@ -20,7 +20,11 @@ pub struct SleepCycle {
 }
 
 impl SleepCycle {
-    pub fn from_event(event: ActivityPeriod, history: &[ParsedHistoryReading]) -> Result<SleepCycle, WhoopError> {
+    pub fn from_event(
+        event: ActivityPeriod,
+        history: &[ParsedHistoryReading],
+        age: Option<u8>,
+    ) -> Result<SleepCycle, WhoopError> {
         let (heart_rate, rr): (Vec<u64>, Vec<Vec<_>>) = history
             .iter()
             .filter(|h| h.time >= event.start && h.time <= event.end)
@@ -44,6 +48,8 @@ impl SleepCycle {
         let bpm = heart_rate.into_iter().sum::<u64>() / heart_rate_count.max(1);
         let avg_bpm = u8::try_from(bpm).map_err(|_| WhoopError::Overflow)?;
 
+        let movement_score = Self::movement_score(event.start, event.end, history);
+
         let id = event.end.date();
 
         Ok(Self {
@@ -56,7 +62,14 @@ impl SleepCycle {
             min_hrv,
             max_hrv,
             avg_hrv,
-            score: Self::sleep_score(event.start, event.end),
+            score: Self::sleep_score_with_signals(
+                event.start,
+                event.end,
+                f64::from(avg_bpm),
+                f64::from(avg_hrv),
+                movement_score,
+                age,
+            ),
         })
     }
 
@@ -90,13 +103,96 @@ impl SleepCycle {
         Some((rr_diff.into_iter().sum::<f64>() / rr_count).sqrt() as u64)
     }
 
+    fn movement_score(start: NaiveDateTime, end: NaiveDateTime, history: &[ParsedHistoryReading]) -> f64 {
+        let mut restless = 0usize;
+        let mut samples = 0usize;
+
+        for window in history
+            .iter()
+            .filter(|h| h.time >= start && h.time <= end)
+            .collect::<Vec<_>>()
+            .windows(2)
+        {
+            let (Some(a), Some(b)) = (window[0].gravity, window[1].gravity) else {
+                continue;
+            };
+
+            let dx = a[0] - b[0];
+            let dy = a[1] - b[1];
+            let dz = a[2] - b[2];
+            let delta = (dx * dx + dy * dy + dz * dz).sqrt();
+
+            // Same threshold as activity detection for "still" gravity movement.
+            if delta > 0.01 {
+                restless += 1;
+            }
+            samples += 1;
+        }
+
+        // If there is no gravity data, keep this component neutral.
+        if samples < 30 {
+            return 50.0;
+        }
+
+        let restless_ratio = restless as f64 / samples as f64;
+        (1.0 - (restless_ratio / 0.35).clamp(0.0, 1.0)) * 100.0
+    }
+
+    fn age_targets(age: Option<u8>) -> (f64, f64, f64) {
+        match age {
+            Some(age) => {
+                let age = f64::from(age);
+                // Older users tend to have slightly higher resting HR and lower RMSSD.
+                let hr_good = (50.0 + (age - 30.0) * 0.15).clamp(45.0, 60.0);
+                let hr_poor = hr_good + 30.0;
+                let hrv_strong = (95.0 - (age - 20.0) * 0.9).clamp(35.0, 90.0);
+                (hr_good, hr_poor, hrv_strong)
+            }
+            None => (50.0, 80.0, 80.0),
+        }
+    }
+
+    fn hr_score(avg_bpm: f64, age: Option<u8>) -> f64 {
+        let (hr_good, hr_poor, _) = Self::age_targets(age);
+        if avg_bpm <= hr_good {
+            return 100.0;
+        }
+        if avg_bpm >= hr_poor {
+            return 0.0;
+        }
+        (1.0 - (avg_bpm - hr_good) / (hr_poor - hr_good)) * 100.0
+    }
+
+    fn hrv_score(avg_hrv: f64, age: Option<u8>) -> f64 {
+        let (_, _, hrv_strong) = Self::age_targets(age);
+        (avg_hrv / hrv_strong * 100.0).clamp(0.0, 100.0)
+    }
+
     pub fn sleep_score(start: NaiveDateTime, end: NaiveDateTime) -> f64 {
-        let duration = (end - start).num_seconds();
+        let duration = (end - start).num_seconds() as f64;
         const IDEAL_DURATION: i64 = 60 * 60 * 8;
 
-        let score = (duration / IDEAL_DURATION) as f64;
+        let score = duration / IDEAL_DURATION as f64;
 
         (score * 100.0).clamp(0.0, 100.0)
+    }
+
+    fn sleep_score_with_signals(
+        start: NaiveDateTime,
+        end: NaiveDateTime,
+        avg_bpm: f64,
+        avg_hrv: f64,
+        movement_score: f64,
+        age: Option<u8>,
+    ) -> f64 {
+        let duration_score = Self::sleep_score(start, end);
+        let hr_score = Self::hr_score(avg_bpm, age);
+        let hrv_score = Self::hrv_score(avg_hrv, age);
+
+        // Weighted composite sleep quality score.
+        // Duration is dominant while physiology/movement refine quality.
+        (0.45 * duration_score + 0.25 * hr_score + 0.15 * hrv_score + 0.15 * movement_score)
+            .clamp(0.0, 100.0)
     }
 }
 
@@ -119,10 +215,10 @@ mod tests {
     }
 
     #[test]
-    fn sleep_score_4h_is_0() {
-        // 4h / 8h = 0.5 -> integer division = 0 -> score = 0
+    fn sleep_score_4h_is_50() {
+        // 4h / 8h = 0.5 -> score = 50
         let score = SleepCycle::sleep_score(dt(22, 0), dt(22, 0) + TimeDelta::hours(4));
-        assert_eq!(score, 0.0);
+        assert_eq!(score, 50.0);
     }
 
     #[test]
@@ -213,10 +309,32 @@ mod tests {
                 gravity: None,
             })
             .collect();
-        let cycle = SleepCycle::from_event(event, &history).unwrap();
+        let cycle = SleepCycle::from_event(event, &history, Some(32)).unwrap();
         assert_eq!(cycle.min_bpm, 60);
         assert_eq!(cycle.max_bpm, 60);
         assert_eq!(cycle.avg_bpm, 60);
-        assert_eq!(cycle.score, 100.0);
+        assert!(cycle.score > 0.0 && cycle.score <= 100.0);
+    }
+
+    #[test]
+    fn composite_score_rewards_better_recovery() {
+        let start = dt(22, 0);
+        let end = start + TimeDelta::hours(8);
+
+        let better = SleepCycle::sleep_score_with_signals(start, end, 52.0, 95.0, 90.0, Some(30));
+        let worse = SleepCycle::sleep_score_with_signals(start, end, 72.0, 20.0, 40.0, Some(30));
+
+        assert!(better > worse);
+    }
+
+    #[test]
+    fn older_age_expects_lower_hrv_target() {
+        let start = dt(22, 0);
+        let end = start + TimeDelta::hours(8);
+
+        let young = SleepCycle::sleep_score_with_signals(start, end, 56.0, 55.0, 80.0, Some(25));
+        let older = SleepCycle::sleep_score_with_signals(start, end, 56.0, 55.0, 80.0, Some(60));
+
+        assert!(older > young);
     }
 }

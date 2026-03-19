@@ -17,6 +17,7 @@ use crate::{
 
 pub struct OpenWhoop {
     pub database: DatabaseHandler,
+    pub user_age: Option<u8>,
     pub packet: Option<WhoopPacket>,
     pub last_history_packet: Option<HistoryReading>,
     pub history_packets: Vec<HistoryReading>,
@@ -24,8 +25,14 @@ pub struct OpenWhoop {
 
 impl OpenWhoop {
     pub fn new(database: DatabaseHandler) -> Self {
+        let user_age = std::env::var("WHOOP_AGE")
+            .ok()
+            .and_then(|v| v.parse::<u8>().ok())
+            .filter(|age| *age > 0 && *age <= 120);
+
         Self {
             database,
+            user_age,
             packet: None,
             last_history_packet: None,
             history_packets: Vec::new(),
@@ -299,7 +306,7 @@ impl OpenWhoop {
                     }
                 }
 
-                let sleep_cycle = SleepCycle::from_event(sleep, &history)?;
+                let sleep_cycle = SleepCycle::from_event(sleep, &history, self.user_age)?;
 
                 info!(
                     "Detected sleep from {} to {}, duration: {}",
