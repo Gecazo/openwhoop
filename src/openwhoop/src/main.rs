@@ -13,9 +13,11 @@ use std::{
 
 use anyhow::anyhow;
 use btleplug::{
-    api::{BDAddr, Central, Manager as _, Peripheral as _, ScanFilter},
+    api::{Central, Manager as _, Peripheral as _, ScanFilter},
     platform::{Adapter, Manager, Peripheral},
 };
+#[cfg(target_os = "linux")]
+use btleplug::api::BDAddr;
 use chrono::{DateTime, Local, NaiveDateTime, NaiveTime, TimeDelta, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
@@ -237,6 +239,10 @@ async fn scan_command(
         })
         .await?;
 
+    if device_id.is_none() {
+        println!("Scanning for WHOOP devices... (press Ctrl+C to stop)");
+    }
+
     loop {
         let peripherals = adapter.peripherals().await?;
 
@@ -388,6 +394,7 @@ impl OpenWhoopCli {
                 scan_command(&adapter, None).await?;
             }
             OpenWhoopCommand::DownloadHistory { whoop } => {
+                info!("Scanning for WHOOP device: {whoop}");
                 let peripheral = scan_command(&adapter, Some(whoop)).await?;
                 let mut whoop =
                     WhoopDevice::new(peripheral, adapter, db_handler, self.debug_packets);
@@ -400,14 +407,19 @@ impl OpenWhoopCli {
                     se.store(true, Ordering::SeqCst);
                 })?;
 
+                info!("Connecting to WHOOP");
                 whoop.connect().await?;
+                info!("Initializing WHOOP sync mode");
                 whoop.initialize().await?;
 
+                info!("Downloading history from WHOOP...");
                 let result = whoop.sync_history(should_exit).await;
 
                 info!("Exiting...");
                 if let Err(e) = result {
                     error!("{}", e);
+                } else {
+                    info!("WHOOP history download completed");
                 }
 
                 loop {
@@ -618,6 +630,7 @@ impl OpenWhoopCli {
         Self::default_adapter(&manager).await
     }
 
+    #[cfg(target_os = "linux")]
     async fn adapter_from_name(manager: &Manager, interface: &str) -> anyhow::Result<Adapter> {
         let adapters = manager.adapters().await?;
         let mut c_adapter = Err(anyhow!("Adapter: `{}` not found", interface));

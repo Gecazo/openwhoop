@@ -110,21 +110,65 @@ impl OpenWhoop {
                     .with_timezone(&Local)
                     .format("%Y-%m-%d %H:%M:%S");
 
-                if hr.imu_data.is_empty() {
-                    info!(target: "HistoryReading", "time: {}", ptime);
-                } else {
-                    info!(target: "HistoryReading", "time: {}, (IMU)", ptime);
-                }
-
                 self.history_packets.push(hr);
+
+                let packet_count = self.history_packets.len();
+                if packet_count % 300 == 0 {
+                    if self
+                        .history_packets
+                        .last()
+                        .map(|p| p.imu_data.is_empty())
+                        .unwrap_or(true)
+                    {
+                        info!(
+                            target: "HistoryReading",
+                            "received {} readings, latest time: {}",
+                            packet_count,
+                            ptime
+                        );
+                    } else {
+                        info!(
+                            target: "HistoryReading",
+                            "received {} readings, latest time: {} (IMU)",
+                            packet_count,
+                            ptime
+                        );
+                    }
+                }
             }
             WhoopData::HistoryMetadata { data, cmd, .. } => match cmd {
-                MetadataType::HistoryComplete => {}
-                MetadataType::HistoryStart => {}
+                MetadataType::HistoryComplete => {
+                    info!("WHOOP history sync marked complete by device");
+                }
+                MetadataType::HistoryStart => {
+                    info!("WHOOP history transfer started");
+                }
                 MetadataType::HistoryEnd => {
+                    let readings = self.history_packets.len();
+                    let first_ts = self.history_packets.first().and_then(|p| {
+                        DateTime::from_timestamp_millis(i64::try_from(p.unix).ok()?)
+                    });
+                    let last_ts = self.history_packets.last().and_then(|p| {
+                        DateTime::from_timestamp_millis(i64::try_from(p.unix).ok()?)
+                    });
+
                     self.database
                         .create_readings(std::mem::take(&mut self.history_packets))
                         .await?;
+
+                    match (first_ts, last_ts) {
+                        (Some(first), Some(last)) => {
+                            info!(
+                                "Saved {} history readings ({} -> {})",
+                                readings,
+                                first.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S"),
+                                last.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S")
+                            );
+                        }
+                        _ => {
+                            info!("Saved {} history readings", readings);
+                        }
+                    }
 
                     let packet = WhoopPacket::history_end(data);
                     return Ok(Some(packet));

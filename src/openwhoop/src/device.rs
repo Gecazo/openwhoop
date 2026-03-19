@@ -103,10 +103,12 @@ impl WhoopDevice {
     pub async fn sync_history(&mut self, should_exit: Arc<AtomicBool>) -> anyhow::Result<()> {
         let mut notifications = self.peripheral.notifications().await?;
 
+        info!("Starting WHOOP history sync...");
         self.send_command(WhoopPacket::history_start()).await?;
 
         'a: loop {
             if should_exit.load(Ordering::SeqCst) {
+                info!("Stopping history sync (CTRL+C requested)");
                 break;
             }
             let notification = notifications.next();
@@ -115,9 +117,11 @@ impl WhoopDevice {
             tokio::select! {
                 _ = sleep_ => {
                     if self.on_sleep().await? {
-                        error!("Whoop disconnected");
-                        for _ in 0..5{
+                        error!("WHOOP disconnected during sync; attempting reconnect");
+                        for attempt in 1..=5 {
+                            info!("Reconnect attempt {attempt}/5");
                             if self.connect().await.is_ok() {
+                                info!("Reconnected successfully, re-initializing sync");
                                 self.initialize().await?;
                                 self.send_command(WhoopPacket::history_start()).await?;
                                 continue 'a;
@@ -126,6 +130,7 @@ impl WhoopDevice {
                             sleep(Duration::from_secs(10)).await;
                         }
 
+                        error!("Could not reconnect to WHOOP after 5 attempts");
                         break;
                     }
                 },
@@ -142,6 +147,7 @@ impl WhoopDevice {
             }
         }
 
+        info!("History sync loop finished");
         Ok(())
     }
 
