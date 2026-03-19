@@ -25,7 +25,7 @@ use openwhoop_entities::packets;
 use dotenv::dotenv;
 use openwhoop::{
     OpenWhoop, WhoopDevice,
-    algo::{ExerciseMetrics, SleepConsistencyAnalyzer},
+    algo::{ExerciseMetrics, SleepConsistencyAnalyzer, helpers::format_hm::FormatHM},
     db::DatabaseHandler,
     types::activities::{ActivityType, SearchActivityPeriods},
 };
@@ -78,6 +78,10 @@ pub enum OpenWhoopCommand {
     /// Print sleep statistics for all time and last week
     ///
     SleepStats,
+    ///
+    /// Print latest detected sleep summary
+    ///
+    LatestSleep,
     ///
     /// Print activity statistics for all time and last week
     ///
@@ -479,6 +483,28 @@ impl OpenWhoopCli {
                 let analyzer = SleepConsistencyAnalyzer::new(last_week);
                 let metrics = analyzer.calculate_consistency_metrics()?;
                 println!("\nWeek: \n{}", metrics);
+            }
+            OpenWhoopCommand::LatestSleep => {
+                let whoop = OpenWhoop::new(db_handler);
+                let Some(sleep) = whoop.get_latest_sleep().await? else {
+                    println!("No sleep records found, exiting now");
+                    return Ok(());
+                };
+
+                println!("Latest sleep");
+                println!("  Date: {}", sleep.id);
+                println!("  Start: {}", sleep.start);
+                println!("  End: {}", sleep.end);
+                println!("  Duration: {}", sleep.duration().format_hm());
+                println!("  Score: {:.1}", sleep.score);
+                println!(
+                    "  Heart rate (min/avg/max): {}/{}/{} bpm",
+                    sleep.min_bpm, sleep.avg_bpm, sleep.max_bpm
+                );
+                println!(
+                    "  HRV RMSSD (min/avg/max): {}/{}/{} ms",
+                    sleep.min_hrv, sleep.avg_hrv, sleep.max_hrv
+                );
             }
             OpenWhoopCommand::ExerciseStats => {
                 let whoop = OpenWhoop::new(db_handler);
