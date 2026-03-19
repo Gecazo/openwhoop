@@ -3,3 +3,9 @@
 db.sqlite
 db.sqlite-journal
 /firmware
+.venv/
+.venv-api/
+__pycache__/
+.pytest_cache/
+node_modules/
+apps/web/.next/

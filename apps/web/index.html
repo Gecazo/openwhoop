@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenWhoop Dashboard</title>
+    <style>
+      :root {
+        --bg: #f4efe7;
+        --panel: #fffaf2;
+        --ink: #182126;
+        --muted: #5c6a73;
+        --accent: #d6672f;
+        --accent-soft: #f3d0bc;
+        --line: #e7d9ca;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(214, 103, 47, 0.18), transparent 22rem),
+          linear-gradient(180deg, #fbf4ea 0%, var(--bg) 100%);
+        color: var(--ink);
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 3rem 1.25rem 4rem;
+      }
+
+      .hero {
+        margin-bottom: 2rem;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2.4rem, 5vw, 4.5rem);
+        line-height: 0.95;
+        letter-spacing: -0.04em;
+      }
+
+      .subtitle {
+        margin-top: 0.9rem;
+        max-width: 42rem;
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1.5;
+      }
+
+      .status {
+        display: inline-flex;
+        margin-top: 1rem;
+        padding: 0.45rem 0.8rem;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: #7f3312;
+        font-size: 0.9rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 1rem;
+      }
+
+      .card {
+        background: rgba(255, 250, 242, 0.86);
+        backdrop-filter: blur(8px);
+        border: 1px solid var(--line);
+        border-radius: 1.4rem;
+        padding: 1rem;
+        box-shadow: 0 12px 30px rgba(24, 33, 38, 0.06);
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 0.88rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .value {
+        margin-top: 0.7rem;
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+      }
+
+      .unit {
+        font-size: 0.95rem;
+        color: var(--muted);
+        margin-left: 0.25rem;
+      }
+
+      .meta {
+        margin-top: 0.5rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .sleep {
+        margin-top: 1rem;
+      }
+
+      .sleep h2 {
+        margin: 0 0 0.8rem;
+        font-size: 1.2rem;
+      }
+
+      .empty {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <h1>OpenWhoop Web</h1>
+        <p class="subtitle">
+          A simple first dashboard for your locally synced WHOOP data. This page
+          expects the Python API to be running on <code>http://127.0.0.1:8000</code>.
+        </p>
+        <div id="status" class="status">Loading dashboard data...</div>
+      </section>
+
+      <section id="metrics" class="grid"></section>
+
+      <section class="sleep card">
+        <h2>Latest Sleep</h2>
+        <div id="sleep-content" class="empty">Waiting for sleep data...</div>
+      </section>
+    </main>
+
+    <script>
+      const apiBase = "http://127.0.0.1:8000";
+
+      const metrics = [
+        ["heart_rate", "Heart Rate"],
+        ["hrv", "HRV"],
+        ["stress", "Stress"],
+        ["spo2", "SpO2"],
+        ["skin_temp", "Skin Temp"],
+        ["steps", "Steps"],
+      ];
+
+      function renderMetric(metric) {
+        const value = metric.value ?? "--";
+        const unit = metric.unit ? `<span class="unit">${metric.unit}</span>` : "";
+        const recorded = metric.recorded_at
+          ? new Date(metric.recorded_at).toLocaleString()
+          : "No data yet";
+
+        return `
+          <article class="card">
+            <div class="label">${metric.label}</div>
+            <div class="value">${value}${unit}</div>
+            <div class="meta">${recorded}</div>
+          </article>
+        `;
+      }
+
+      function renderSleep(sleep) {
+        if (!sleep) {
+          return "No sleep cycle has been calculated yet.";
+        }
+
+        return `
+          <div class="grid">
+            <article>
+              <div class="label">Score</div>
+              <div class="value">${sleep.score ?? "--"}</div>
+            </article>
+            <article>
+              <div class="label">Duration</div>
+              <div class="value">${sleep.duration_hours}<span class="unit">hours</span></div>
+            </article>
+            <article>
+              <div class="label">Average HRV</div>
+              <div class="value">${sleep.avg_hrv}<span class="unit">ms</span></div>
+            </article>
+            <article>
+              <div class="label">Average BPM</div>
+              <div class="value">${sleep.avg_bpm}<span class="unit">bpm</span></div>
+            </article>
+          </div>
+          <div class="meta" style="margin-top: 1rem;">
+            ${new Date(sleep.start).toLocaleString()} to ${new Date(sleep.end).toLocaleString()}
+          </div>
+        `;
+      }
+
+      async function loadDashboard() {
+        const status = document.getElementById("status");
+        const metricsEl = document.getElementById("metrics");
+        const sleepEl = document.getElementById("sleep-content");
+
+        try {
+          const response = await fetch(`${apiBase}/api/v1/dashboard`);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+          status.textContent = "Dashboard connected";
+          metricsEl.innerHTML = metrics.map(([key]) => renderMetric(data[key])).join("");
+          sleepEl.innerHTML = renderSleep(data.latest_sleep);
+        } catch (error) {
+          status.textContent = `Could not reach API: ${error.message}`;
+          sleepEl.textContent = "Start the Python API and refresh this page.";
+        }
+      }
+
+      loadDashboard();
+    </script>
+  </body>
+</html>
