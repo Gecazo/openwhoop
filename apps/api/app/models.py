@@ -9,6 +9,12 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class SyncResponse(BaseModel):
+    status: str
+    message: str
+    command: str | None = None
+
+
 class SummaryMetric(BaseModel):
     label: str
     value: float | int | None
@@ -47,3 +53,12 @@ class HeartRatePoint(BaseModel):
 
 class TrendResponse(BaseModel):
     points: list[HeartRatePoint]
+
+
+class SkinTemperaturePoint(BaseModel):
+    time: datetime
+    skin_temp: float
+
+
+class SkinTemperatureTrendResponse(BaseModel):
+    points: list[SkinTemperaturePoint]

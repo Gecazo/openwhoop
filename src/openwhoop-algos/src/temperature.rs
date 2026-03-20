@@ -21,7 +21,7 @@ impl SkinTempCalculator {
     const CONVERSION_FACTOR: f64 = 0.04;
 
     /// Minimum valid raw reading (below this is likely off-wrist or sensor error)
-    const MIN_RAW: u16 = 100;
+    pub const MIN_RAW: u16 = 100;
 
     pub fn convert(time: NaiveDateTime, skin_temp_raw: u16) -> Option<SkinTempScore> {
         if skin_temp_raw < Self::MIN_RAW {

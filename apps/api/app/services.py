@@ -3,7 +3,15 @@ from __future__ import annotations
 from datetime import datetime
 
 from .db import get_connection
-from .models import DashboardSummary, HeartRatePoint, SleepSummary, SummaryMetric, TrendResponse
+from .models import (
+    DashboardSummary,
+    HeartRatePoint,
+    SkinTemperaturePoint,
+    SkinTemperatureTrendResponse,
+    SleepSummary,
+    SummaryMetric,
+    TrendResponse,
+)
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -36,6 +44,15 @@ def get_dashboard_summary() -> DashboardSummary:
             FROM sleep_cycles
             ORDER BY end DESC
             LIMIT 1
+            """
+        ).fetchone()
+
+        spo2_row = connection.execute(
+            """
+            SELECT AVG(spo2) AS avg_spo2, MAX(time) AS latest_spo2_time
+            FROM heart_rate
+            WHERE time >= datetime('now', 'localtime', '-12 hours')
+              AND spo2 IS NOT NULL
             """
         ).fetchone()
 
@@ -95,10 +112,10 @@ def get_dashboard_summary() -> DashboardSummary:
             recorded_at=last_updated,
         ),
         spo2=SummaryMetric(
-            label="SpO2",
-            value=latest_row["spo2"] if latest_row else None,
+            label="SpO2 Avg (12h)",
+            value=spo2_row["avg_spo2"] if spo2_row else None,
             unit="%",
-            recorded_at=last_updated,
+            recorded_at=_parse_datetime(spo2_row["latest_spo2_time"]) if spo2_row else None,
         ),
         skin_temp=SummaryMetric(
             label="Skin Temp",
@@ -116,18 +133,18 @@ def get_dashboard_summary() -> DashboardSummary:
     )
 
 
-def get_heart_rate_trend(limit: int = 100) -> TrendResponse:
-    query_limit = max(1, min(limit, 1000))
+def get_heart_rate_trend(hours: int = 12) -> TrendResponse:
+    query_hours = max(1, min(hours, 72))
 
     with get_connection() as connection:
         rows = connection.execute(
             """
             SELECT time, bpm, stress, spo2, skin_temp
             FROM heart_rate
-            ORDER BY time DESC
-            LIMIT ?
+            WHERE time >= datetime('now', 'localtime', ?)
+            ORDER BY time ASC
             """,
-            (query_limit,),
+            (f"-{query_hours} hours",),
         ).fetchall()
 
     points = [
@@ -138,7 +155,33 @@ def get_heart_rate_trend(limit: int = 100) -> TrendResponse:
             spo2=row["spo2"],
             skin_temp=row["skin_temp"],
         )
-        for row in reversed(rows)
+        for row in rows
     ]
 
     return TrendResponse(points=points)
+
+
+def get_skin_temperature_trend(hours: int = 12) -> SkinTemperatureTrendResponse:
+    query_hours = max(1, min(hours, 72))
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT time, skin_temp
+            FROM heart_rate
+            WHERE time >= datetime('now', 'localtime', ?)
+              AND skin_temp IS NOT NULL
+            ORDER BY time ASC
+            """,
+            (f"-{query_hours} hours",),
+        ).fetchall()
+
+    points = [
+        SkinTemperaturePoint(
+            time=_parse_datetime(row["time"]),
+            skin_temp=row["skin_temp"],
+        )
+        for row in rows
+    ]
+
+    return SkinTemperatureTrendResponse(points=points)

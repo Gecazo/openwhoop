@@ -1,7 +1,7 @@
 use crate::{DatabaseHandler, SearchHistory};
 
 use chrono::NaiveDateTime;
-use openwhoop_algos::SkinTempScore;
+use openwhoop_algos::{SkinTempCalculator, SkinTempScore};
 use openwhoop_codec::SensorData;
 use openwhoop_entities::heart_rate;
 use sea_orm::{
@@ -47,6 +47,10 @@ impl DatabaseHandler {
             .filter_map(|m| {
                 let json = m.sensor_data?;
                 let sd: SensorData = serde_json::from_value(json).ok()?;
+                if sd.skin_temp_raw < SkinTempCalculator::MIN_RAW {
+                    return None;
+                }
+
                 Some(TempReading {
                     time: m.time,
                     skin_temp_raw: sd.skin_temp_raw,
@@ -96,6 +100,41 @@ mod tests {
     #[tokio::test]
     async fn search_temp_readings_empty() {
         let db = DatabaseHandler::new("sqlite::memory:").await;
+        let readings = db
+            .search_temp_readings(SearchHistory::default())
+            .await
+            .unwrap();
+        assert!(readings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_temp_readings_ignores_invalid_raw_values() {
+        let db = DatabaseHandler::new("sqlite::memory:").await;
+
+        let sensor = openwhoop_codec::SensorData {
+            ppg_green: 100,
+            ppg_red_ir: 200,
+            spo2_red: 3000,
+            spo2_ir: 4000,
+            skin_temp_raw: 50,
+            ambient_light: 50,
+            led_drive_1: 10,
+            led_drive_2: 20,
+            resp_rate_raw: 0,
+            signal_quality: 0,
+            skin_contact: 1,
+            accel_gravity: [0.0, 0.0, 1.0],
+        };
+
+        let reading = openwhoop_codec::HistoryReading {
+            unix: 1735689600000,
+            bpm: 72,
+            rr: vec![833],
+            imu_data: vec![],
+            sensor_data: Some(sensor),
+        };
+        db.create_reading(reading).await.unwrap();
+
         let readings = db
             .search_temp_readings(SearchHistory::default())
             .await

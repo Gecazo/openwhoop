@@ -32,6 +32,10 @@ pub struct WhoopDevice {
 }
 
 impl WhoopDevice {
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+    const DISCOVER_SERVICES_TIMEOUT: Duration = Duration::from_secs(15);
+    const HISTORY_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+
     pub fn new(
         peripheral: Peripheral,
         adapter: Adapter,
@@ -47,9 +51,21 @@ impl WhoopDevice {
     }
 
     pub async fn connect(&mut self) -> anyhow::Result<()> {
-        self.peripheral.connect().await?;
+        timeout(Self::CONNECT_TIMEOUT, self.peripheral.connect())
+            .await
+            .map_err(|_| anyhow!("Timed out after {}s connecting to WHOOP", Self::CONNECT_TIMEOUT.as_secs()))??;
         let _ = self.adapter.stop_scan().await;
-        self.peripheral.discover_services().await?;
+        timeout(
+            Self::DISCOVER_SERVICES_TIMEOUT,
+            self.peripheral.discover_services(),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Timed out after {}s discovering WHOOP services",
+                Self::DISCOVER_SERVICES_TIMEOUT.as_secs()
+            )
+        })??;
         self.whoop.packet_buffer.clear();
         Ok(())
     }
@@ -112,7 +128,7 @@ impl WhoopDevice {
                 break;
             }
             let notification = notifications.next();
-            let sleep_ = sleep(Duration::from_secs(10));
+            let sleep_ = sleep(Self::HISTORY_IDLE_TIMEOUT);
 
             tokio::select! {
                 _ = sleep_ => {
@@ -131,6 +147,10 @@ impl WhoopDevice {
                         }
 
                         error!("Could not reconnect to WHOOP after 5 attempts");
+                        break;
+                    } else if self.whoop.is_history_caught_up() {
+                        info!("Latest WHOOP history reading is near real time; finishing sync");
+                        self.whoop.flush_current_history_batch().await?;
                         break;
                     }
                 },
@@ -177,5 +197,21 @@ impl WhoopDevice {
             Ok(None) => Err(anyhow!("stream ended unexpectedly")),
             Err(_) => Err(anyhow!("timed out waiting for version notification")),
         }
+    }
+
+    pub async fn run_post_sync_processing(&self) -> anyhow::Result<()> {
+        info!("Calculating derived metrics from synced history...");
+
+        info!("Calculating stress...");
+        self.whoop.calculate_stress().await?;
+
+        info!("Calculating SpO2...");
+        self.whoop.calculate_spo2().await?;
+
+        info!("Calculating skin temperature...");
+        self.whoop.calculate_skin_temp().await?;
+
+        info!("Post-sync processing completed");
+        Ok(())
     }
 }

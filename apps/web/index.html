@@ -3,16 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
     <title>OpenWhoop Dashboard</title>
     <style>
       :root {
-        --bg: #f4efe7;
-        --panel: #fffaf2;
-        --ink: #182126;
-        --muted: #5c6a73;
-        --accent: #d6672f;
-        --accent-soft: #f3d0bc;
-        --line: #e7d9ca;
+        --bg: #091116;
+        --panel: rgba(12, 20, 28, 0.82);
+        --ink: #ecf3f7;
+        --muted: #8da1ae;
+        --accent: #ff7a3d;
+        --accent-2: #5fd1c2;
+        --accent-soft: rgba(255, 122, 61, 0.16);
+        --accent-soft-2: rgba(95, 209, 194, 0.14);
+        --line: rgba(141, 161, 174, 0.16);
+        --shadow: rgba(0, 0, 0, 0.28);
       }
 
       * {
@@ -23,8 +27,9 @@
         margin: 0;
         font-family: "Avenir Next", "Segoe UI", sans-serif;
         background:
-          radial-gradient(circle at top left, rgba(214, 103, 47, 0.18), transparent 22rem),
-          linear-gradient(180deg, #fbf4ea 0%, var(--bg) 100%);
+          radial-gradient(circle at top left, rgba(255, 122, 61, 0.18), transparent 24rem),
+          radial-gradient(circle at 85% 12%, rgba(95, 209, 194, 0.16), transparent 18rem),
+          linear-gradient(180deg, #0d171e 0%, var(--bg) 100%);
         color: var(--ink);
       }
 
@@ -35,7 +40,10 @@
       }
 
       .hero {
-        margin-bottom: 2rem;
+        margin-bottom: 1.5rem;
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
+        gap: 1rem;
       }
 
       h1 {
@@ -59,8 +67,44 @@
         padding: 0.45rem 0.8rem;
         border-radius: 999px;
         background: var(--accent-soft);
-        color: #7f3312;
+        color: #ffc3a8;
         font-size: 0.9rem;
+      }
+
+      .status.sync {
+        background: var(--accent-soft-2);
+        color: #a4efe6;
+      }
+
+      .hero-panel,
+      .card {
+        background: var(--panel);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--line);
+        box-shadow: 0 14px 34px var(--shadow);
+      }
+
+      .hero-panel {
+        border-radius: 1.8rem;
+        padding: 1.3rem 1.35rem;
+      }
+
+      .hero-summary {
+        display: grid;
+        gap: 0.8rem;
+        align-content: start;
+      }
+
+      .hero-stat {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.85rem 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .hero-stat:last-child {
+        border-bottom: 0;
       }
 
       .grid {
@@ -70,12 +114,8 @@
       }
 
       .card {
-        background: rgba(255, 250, 242, 0.86);
-        backdrop-filter: blur(8px);
-        border: 1px solid var(--line);
         border-radius: 1.4rem;
         padding: 1rem;
-        box-shadow: 0 12px 30px rgba(24, 33, 38, 0.06);
       }
 
       .label {
@@ -104,8 +144,21 @@
         font-size: 0.9rem;
       }
 
+      .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        margin: 2rem 0 0.8rem;
+      }
+
+      .section-header h2 {
+        margin: 0;
+        font-size: 1.2rem;
+      }
+
       .sleep {
-        margin-top: 1rem;
+        margin-top: 0;
       }
 
       .sleep h2 {
@@ -113,54 +166,325 @@
         font-size: 1.2rem;
       }
 
+      .sleep-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+      }
+
+      .sleep-metric {
+        padding: 0.8rem 0.9rem;
+        border-radius: 1rem;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--line);
+      }
+
+      .trend-card {
+        padding: 1.1rem;
+      }
+
+      .trend-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+      }
+
+      .trend-note {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .chart-shell {
+        margin-top: 1rem;
+        padding: 1rem;
+        border-radius: 1.3rem;
+        background: linear-gradient(180deg, rgba(95, 209, 194, 0.08), rgba(95, 209, 194, 0.02));
+        border: 1px solid rgba(95, 209, 194, 0.14);
+      }
+
+      .chart {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+
+      .chart-axis,
+      .chart-grid {
+        fill: none;
+        stroke-linecap: round;
+      }
+
+      .chart-axis {
+        stroke: rgba(255, 255, 255, 0.18);
+        stroke-width: 1.2;
+      }
+
+      .chart-grid {
+        stroke: rgba(255, 255, 255, 0.08);
+        stroke-width: 1;
+      }
+
+      .chart-text {
+        fill: var(--muted);
+        font-size: 12px;
+      }
+
+      .chart-unit {
+        fill: var(--ink);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+
+      .chart-labels {
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-top: 0.6rem;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.45rem 0.75rem;
+        border-radius: 999px;
+        background: rgba(95, 209, 194, 0.12);
+        color: var(--accent-2);
+        font-size: 0.88rem;
+      }
+
       .empty {
         color: var(--muted);
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.7rem;
+        align-items: center;
+      }
+
+      button {
+        appearance: none;
+        border: 0;
+        border-radius: 999px;
+        padding: 0.75rem 1rem;
+        background: var(--accent);
+        color: white;
+        cursor: pointer;
+        font: inherit;
+      }
+
+      button.secondary {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--ink);
+      }
+
+      button.sync {
+        background: linear-gradient(135deg, #5fd1c2, #2d8f84);
+        color: #071115;
+        font-weight: 600;
+      }
+
+      @media (max-width: 820px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
     <main>
       <section class="hero">
-        <h1>OpenWhoop Web</h1>
-        <p class="subtitle">
-          A simple first dashboard for your locally synced WHOOP data. This page
-          expects the Python API to be running on <code>http://127.0.0.1:8000</code>.
-        </p>
-        <div id="status" class="status">Loading dashboard data...</div>
+        <div class="hero-panel">
+          <h1>OpenWhoop Web</h1>
+          <p class="subtitle">
+            A local-first dashboard for your WHOOP sync data. It surfaces the core
+            stats you usually want first: heart rate, HRV, sleep score, stress, and
+            a quick recent trend.
+          </p>
+          <div class="actions">
+            <div id="status" class="status">Loading dashboard data...</div>
+            <button id="sync-button" class="sync" type="button">Sync Data</button>
+            <button id="refresh-button" class="secondary" type="button">Refresh</button>
+          </div>
+          <div id="sync-message" class="meta" style="margin-top: 0.9rem;"></div>
+        </div>
+        <aside class="hero-panel hero-summary">
+          <div class="pill">Python API + local SQLite</div>
+          <div class="hero-stat">
+            <div>
+              <div class="label">Backend</div>
+              <div class="meta">FastAPI on the same origin</div>
+            </div>
+            <strong id="backend-state">Checking</strong>
+          </div>
+          <div class="hero-stat">
+            <div>
+              <div class="label">Latest Sync</div>
+              <div class="meta">Most recent heart rate sample</div>
+            </div>
+            <strong id="last-sync">--</strong>
+          </div>
+          <div class="hero-stat">
+            <div>
+              <div class="label">Current Focus</div>
+              <div class="meta">Basic stats and trend visibility</div>
+            </div>
+            <strong>Dashboard MVP</strong>
+          </div>
+        </aside>
       </section>
 
+      <div class="section-header">
+        <h2>Core Stats</h2>
+        <span class="trend-note">These cards use `/api/v1/dashboard`.</span>
+      </div>
       <section id="metrics" class="grid"></section>
 
-      <section class="sleep card">
+      <div class="section-header">
         <h2>Latest Sleep</h2>
+        <span class="trend-note">Duration, score, HRV, and average BPM.</span>
+      </div>
+      <section class="sleep card">
         <div id="sleep-content" class="empty">Waiting for sleep data...</div>
+      </section>
+
+      <div class="section-header">
+        <h2>Recent Heart Rate Trend</h2>
+        <span class="trend-note">Last 12 hours from `/api/v1/heart-rate`.</span>
+      </div>
+      <section class="trend-card card">
+        <div class="trend-head">
+          <div>
+            <div class="label">Live Trend</div>
+            <div class="meta">A simple first chart for the last 12 hours</div>
+          </div>
+          <strong id="trend-summary">--</strong>
+        </div>
+        <div id="trend-chart" class="chart-shell empty">Loading chart...</div>
+      </section>
+
+      <div class="section-header">
+        <h2>Skin Temperature</h2>
+        <span class="trend-note">Last 12 hours from `/api/v1/skin-temperature`.</span>
+      </div>
+      <section class="trend-card card">
+        <div class="trend-head">
+          <div>
+            <div class="label">Temperature Trend</div>
+            <div class="meta">Recent skin temperature readings</div>
+          </div>
+          <strong id="temp-summary">--</strong>
+        </div>
+        <div id="temp-chart" class="chart-shell empty">Loading temperature chart...</div>
+      </section>
+
+      <div class="section-header">
+        <h2>Stress</h2>
+        <span class="trend-note">Last 12 hours from `/api/v1/heart-rate`.</span>
+      </div>
+      <section class="trend-card card">
+        <div class="trend-head">
+          <div>
+            <div class="label">Stress Trend</div>
+            <div class="meta">Recent calculated stress values</div>
+          </div>
+          <strong id="stress-summary">--</strong>
+        </div>
+        <div id="stress-chart" class="chart-shell empty">Loading stress chart...</div>
+      </section>
+
+      <div class="section-header">
+        <h2>SpO2</h2>
+        <span class="trend-note">Last 12 hours from `/api/v1/heart-rate`.</span>
+      </div>
+      <section class="trend-card card">
+        <div class="trend-head">
+          <div>
+            <div class="label">SpO2 Trend</div>
+            <div class="meta">Recent estimated blood oxygen values</div>
+          </div>
+          <strong id="spo2-summary">--</strong>
+        </div>
+        <div id="spo2-chart" class="chart-shell empty">Loading SpO2 chart...</div>
       </section>
     </main>
 
     <script>
-      const apiBase = "http://127.0.0.1:8000";
+      const apiBase = window.location.origin;
+      const trendHours = 12;
 
       const metrics = [
-        ["heart_rate", "Heart Rate"],
-        ["hrv", "HRV"],
-        ["stress", "Stress"],
-        ["spo2", "SpO2"],
-        ["skin_temp", "Skin Temp"],
-        ["steps", "Steps"],
+        "heart_rate",
+        "hrv",
+        "stress",
+        "spo2",
+        "skin_temp",
+        "steps",
       ];
 
-      function renderMetric(metric) {
-        const value = metric.value ?? "--";
+      const roundedMetric = new Set(["stress", "spo2", "skin_temp"]);
+
+      function formatValue(key, value) {
+        if (value === null || value === undefined) {
+          return "--";
+        }
+
+        if (roundedMetric.has(key) && typeof value === "number") {
+          return value.toFixed(1);
+        }
+
+        return value;
+      }
+
+      function formatDateTime(value) {
+        return value ? new Date(value).toLocaleString() : "No data yet";
+      }
+
+      async function triggerSync() {
+        const status = document.getElementById("status");
+        const syncMessage = document.getElementById("sync-message");
+        const syncButton = document.getElementById("sync-button");
+
+        syncButton.disabled = true;
+        status.textContent = "Sync requested...";
+        status.classList.add("sync");
+
+        try {
+          const response = await fetch(`${apiBase}/api/v1/sync`, {
+            method: "POST",
+          });
+
+          if (!response.ok) {
+            throw new Error(`Sync HTTP ${response.status}`);
+          }
+
+          const result = await response.json();
+          status.textContent = "Manual sync ready";
+          syncMessage.textContent = result.command
+            ? `${result.message} Command: ${result.command}`
+            : result.message;
+        } catch (error) {
+          status.textContent = "Sync unavailable";
+          syncMessage.textContent = `Could not prepare sync: ${error.message}`;
+        } finally {
+          syncButton.disabled = false;
+        }
+      }
+
+      function renderMetric(key, metric) {
+        const value = formatValue(key, metric.value);
         const unit = metric.unit ? `<span class="unit">${metric.unit}</span>` : "";
-        const recorded = metric.recorded_at
-          ? new Date(metric.recorded_at).toLocaleString()
-          : "No data yet";
 
         return `
           <article class="card">
             <div class="label">${metric.label}</div>
             <div class="value">${value}${unit}</div>
-            <div class="meta">${recorded}</div>
+            <div class="meta">${formatDateTime(metric.recorded_at)}</div>
           </article>
         `;
       }
@@ -170,52 +494,384 @@
           return "No sleep cycle has been calculated yet.";
         }
 
+        const score = sleep.score === null || sleep.score === undefined ? "--" : sleep.score.toFixed(1);
         return `
-          <div class="grid">
-            <article>
+          <div class="sleep-grid">
+            <article class="sleep-metric">
               <div class="label">Score</div>
-              <div class="value">${sleep.score ?? "--"}</div>
+              <div class="value">${score}</div>
             </article>
-            <article>
+            <article class="sleep-metric">
               <div class="label">Duration</div>
               <div class="value">${sleep.duration_hours}<span class="unit">hours</span></div>
             </article>
-            <article>
+            <article class="sleep-metric">
               <div class="label">Average HRV</div>
               <div class="value">${sleep.avg_hrv}<span class="unit">ms</span></div>
             </article>
-            <article>
+            <article class="sleep-metric">
               <div class="label">Average BPM</div>
               <div class="value">${sleep.avg_bpm}<span class="unit">bpm</span></div>
             </article>
           </div>
           <div class="meta" style="margin-top: 1rem;">
-            ${new Date(sleep.start).toLocaleString()} to ${new Date(sleep.end).toLocaleString()}
+            ${formatDateTime(sleep.start)} to ${formatDateTime(sleep.end)}
           </div>
         `;
+      }
+
+      function buildPath(points, width, height, padding) {
+        return buildMetricPath(points, width, height, padding, "bpm");
+      }
+
+      function averageBuckets(points, key, bucketSize = 10) {
+        if (points.length <= bucketSize) {
+          return points;
+        }
+
+        const buckets = [];
+
+        for (let index = 0; index < points.length; index += bucketSize) {
+          const window = points.slice(index, index + bucketSize);
+          const avg =
+            window.reduce((sum, item) => sum + item[key], 0) / Math.max(window.length, 1);
+          const middle = window[Math.floor(window.length / 2)];
+
+          buckets.push({
+            ...middle,
+            [key]: avg,
+          });
+        }
+
+        return buckets;
+      }
+
+      function buildMetricPath(points, width, height, padding, key) {
+        if (!points.length) {
+          return { path: "", coords: [] };
+        }
+
+        const values = points.map((point) => point[key]);
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const span = Math.max(max - min, 0.01);
+
+        const coords = points.map((point, index) => {
+          const x = padding + (index * (width - padding * 2)) / Math.max(points.length - 1, 1);
+          const y =
+            height -
+            padding -
+            ((point[key] - min) * (height - padding * 2)) / span;
+
+          return { x, y };
+        });
+
+        if (coords.length === 1) {
+          return {
+            coords,
+            path: `M ${coords[0].x.toFixed(1)} ${coords[0].y.toFixed(1)}`,
+          };
+        }
+
+        let path = `M ${coords[0].x.toFixed(1)} ${coords[0].y.toFixed(1)}`;
+
+        for (let index = 0; index < coords.length - 1; index += 1) {
+          const current = coords[index];
+          const next = coords[index + 1];
+          const midX = (current.x + next.x) / 2;
+          const midY = (current.y + next.y) / 2;
+
+          path += ` Q ${current.x.toFixed(1)} ${current.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`;
+        }
+
+        const last = coords[coords.length - 1];
+        path += ` T ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+
+        return { path, coords };
+      }
+
+      function buildAreaPath(coords, height, padding) {
+        if (!coords.length) {
+          return "";
+        }
+
+        const first = coords[0];
+        const last = coords[coords.length - 1];
+        let path = `M ${first.x.toFixed(1)} ${(height - padding).toFixed(1)} `;
+        path += `L ${first.x.toFixed(1)} ${first.y.toFixed(1)} `;
+
+        for (let index = 0; index < coords.length - 1; index += 1) {
+          const current = coords[index];
+          const next = coords[index + 1];
+          const midX = (current.x + next.x) / 2;
+          const midY = (current.y + next.y) / 2;
+
+          path += `Q ${current.x.toFixed(1)} ${current.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)} `;
+        }
+
+        path += `T ${last.x.toFixed(1)} ${last.y.toFixed(1)} `;
+        path += `L ${last.x.toFixed(1)} ${(height - padding).toFixed(1)} Z`;
+        return path;
+      }
+
+      function formatClockLabel(value) {
+        return new Date(value).toLocaleTimeString([], {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
+
+      function formatAxisValue(value, digits = 0) {
+        return digits > 0 ? value.toFixed(digits) : Math.round(value).toString();
+      }
+
+      function buildHourlyTicks(points, width, padding) {
+        if (!points.length) {
+          return [];
+        }
+
+        const startTime = new Date(points[0].time).getTime();
+        const endTime = new Date(points[points.length - 1].time).getTime();
+        if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) {
+          return [];
+        }
+
+        const hourMs = 60 * 60 * 1000;
+        const firstHour = Math.ceil(startTime / hourMs) * hourMs;
+        const ticks = [];
+
+        for (let time = firstHour; time <= endTime; time += hourMs) {
+          const ratio = (time - startTime) / (endTime - startTime);
+          const x = padding + ratio * (width - padding * 2);
+          ticks.push({
+            x,
+            label: formatClockLabel(time),
+          });
+        }
+
+        return ticks;
+      }
+
+      function renderTimeSeriesChart({ points, key, color, unit, digits = 0, gradientId, ariaLabel }) {
+        const sampledPoints = averageBuckets(points, key, 10);
+        const width = 900;
+        const height = 320;
+        const padding = 42;
+        const { path, coords } = buildMetricPath(sampledPoints, width, height, padding, key);
+        const areaPath = buildAreaPath(coords, height, padding);
+        const values = sampledPoints.map((point) => point[key]);
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const span = Math.max(max - min, key === "bpm" ? 1 : 0.01);
+        const first = points[0];
+        const last = points[points.length - 1];
+        const lastCoord = coords[coords.length - 1];
+
+        const ticks = [0, 0.5, 1].map((ratio) => {
+          const value = min + (1 - ratio) * span;
+          const y = padding + ratio * (height - padding * 2);
+          return { value, y };
+        });
+
+        const hourlyTicks = buildHourlyTicks(points, width, padding);
+
+        return {
+          min,
+          max,
+          markup: `
+            <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${ariaLabel}">
+              <defs>
+                <linearGradient id="${gradientId}" x1="0%" x2="0%" y1="0%" y2="100%">
+                  <stop offset="0%" stop-color="${color}" stop-opacity="0.32" />
+                  <stop offset="100%" stop-color="${color}" stop-opacity="0.02" />
+                </linearGradient>
+              </defs>
+              ${ticks.map(({ y }) => `
+                <line class="chart-grid" x1="${padding}" y1="${y.toFixed(1)}" x2="${(width - padding).toFixed(1)}" y2="${y.toFixed(1)}"></line>
+              `).join("")}
+              ${hourlyTicks.map(({ x }) => `
+                <line class="chart-grid" x1="${x.toFixed(1)}" y1="${padding}" x2="${x.toFixed(1)}" y2="${(height - padding).toFixed(1)}"></line>
+              `).join("")}
+              <line class="chart-axis" x1="${padding}" y1="${padding}" x2="${padding}" y2="${(height - padding).toFixed(1)}"></line>
+              <line class="chart-axis" x1="${padding}" y1="${(height - padding).toFixed(1)}" x2="${(width - padding).toFixed(1)}" y2="${(height - padding).toFixed(1)}"></line>
+              <path d="${areaPath}" fill="url(#${gradientId})"></path>
+              <path
+                d="${path}"
+                fill="none"
+                stroke="${color}"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <circle
+                cx="${lastCoord.x.toFixed(1)}"
+                cy="${lastCoord.y.toFixed(1)}"
+                r="6"
+                fill="${color}"
+                stroke="#091116"
+                stroke-width="3"
+              />
+              ${ticks.map(({ value, y }) => `
+                <text class="chart-text" x="${(padding - 10).toFixed(1)}" y="${(y + 4).toFixed(1)}" text-anchor="end">${formatAxisValue(value, digits)}</text>
+              `).join("")}
+              ${hourlyTicks.map(({ x, label }) => `
+                <text class="chart-text" x="${x.toFixed(1)}" y="${(height - 14).toFixed(1)}" text-anchor="middle">${label}</text>
+              `).join("")}
+              <text class="chart-unit" x="${padding}" y="20">${unit} vs time</text>
+            </svg>
+          `,
+        };
+      }
+
+      function renderTrend(points) {
+        if (!points.length) {
+          document.getElementById("trend-summary").textContent = "--";
+          return "No heart-rate trend data available yet.";
+        }
+        const chart = renderTimeSeriesChart({
+          points,
+          key: "bpm",
+          color: "#ff7a3d",
+          unit: "BPM",
+          digits: 0,
+          gradientId: "heartRateGradient",
+          ariaLabel: "Heart rate over time chart",
+        });
+        document.getElementById("trend-summary").textContent = `${Math.round(chart.min)} to ${Math.round(chart.max)} bpm`;
+        return chart.markup;
+      }
+
+      function renderTemperatureTrend(points) {
+        if (!points.length) {
+          document.getElementById("temp-summary").textContent = "--";
+          return "No skin temperature data available yet.";
+        }
+        const chart = renderTimeSeriesChart({
+          points,
+          key: "skin_temp",
+          color: "#5fd1c2",
+          unit: "C",
+          digits: 1,
+          gradientId: "temperatureGradient",
+          ariaLabel: "Skin temperature over time chart",
+        });
+        document.getElementById("temp-summary").textContent = `${chart.min.toFixed(1)} to ${chart.max.toFixed(1)} C`;
+        return chart.markup;
+      }
+
+      function renderStressTrend(points) {
+        const stressPoints = points.filter((point) => point.stress !== null && point.stress !== undefined);
+
+        if (!stressPoints.length) {
+          document.getElementById("stress-summary").textContent = "--";
+          return "No stress trend data available yet.";
+        }
+
+        const chart = renderTimeSeriesChart({
+          points: stressPoints,
+          key: "stress",
+          color: "#ffd166",
+          unit: "Stress",
+          digits: 1,
+          gradientId: "stressGradient",
+          ariaLabel: "Stress over time chart",
+        });
+        document.getElementById("stress-summary").textContent = `${chart.min.toFixed(1)} to ${chart.max.toFixed(1)}`;
+        return chart.markup;
+      }
+
+      function renderSpo2Trend(points) {
+        const spo2Points = points.filter((point) => point.spo2 !== null && point.spo2 !== undefined);
+
+        if (!spo2Points.length) {
+          document.getElementById("spo2-summary").textContent = "--";
+          return "No SpO2 trend data available yet.";
+        }
+
+        const chart = renderTimeSeriesChart({
+          points: spo2Points,
+          key: "spo2",
+          color: "#7fb3ff",
+          unit: "SpO2 %",
+          digits: 1,
+          gradientId: "spo2Gradient",
+          ariaLabel: "SpO2 over time chart",
+        });
+        document.getElementById("spo2-summary").textContent = `${chart.min.toFixed(1)} to ${chart.max.toFixed(1)} %`;
+        return chart.markup;
       }
 
       async function loadDashboard() {
         const status = document.getElementById("status");
         const metricsEl = document.getElementById("metrics");
         const sleepEl = document.getElementById("sleep-content");
+        const trendEl = document.getElementById("trend-chart");
+        const tempEl = document.getElementById("temp-chart");
+        const stressEl = document.getElementById("stress-chart");
+        const spo2El = document.getElementById("spo2-chart");
+        const backendState = document.getElementById("backend-state");
+        const lastSync = document.getElementById("last-sync");
+        const syncMessage = document.getElementById("sync-message");
+
+        status.textContent = "Refreshing...";
+        status.classList.remove("sync");
+        backendState.textContent = "Loading";
 
         try {
-          const response = await fetch(`${apiBase}/api/v1/dashboard`);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+          const [dashboardResponse, trendResponse, tempResponse] = await Promise.all([
+            fetch(`${apiBase}/api/v1/dashboard`),
+            fetch(`${apiBase}/api/v1/heart-rate?hours=${trendHours}`),
+            fetch(`${apiBase}/api/v1/skin-temperature?hours=${trendHours}`),
+          ]);
+
+          if (!dashboardResponse.ok) {
+            throw new Error(`Dashboard HTTP ${dashboardResponse.status}`);
           }
 
-          const data = await response.json();
+          if (!trendResponse.ok) {
+            throw new Error(`Trend HTTP ${trendResponse.status}`);
+          }
+
+          if (!tempResponse.ok) {
+            throw new Error(`Temperature HTTP ${tempResponse.status}`);
+          }
+
+          const dashboard = await dashboardResponse.json();
+          const trend = await trendResponse.json();
+          const temp = await tempResponse.json();
+
           status.textContent = "Dashboard connected";
-          metricsEl.innerHTML = metrics.map(([key]) => renderMetric(data[key])).join("");
-          sleepEl.innerHTML = renderSleep(data.latest_sleep);
+          backendState.textContent = "Online";
+          lastSync.textContent = formatDateTime(dashboard.last_updated);
+          syncMessage.textContent = "Use Sync Data to pull new device data, then refresh this view.";
+          metricsEl.innerHTML = metrics.map((key) => renderMetric(key, dashboard[key])).join("");
+          sleepEl.innerHTML = renderSleep(dashboard.latest_sleep);
+          trendEl.classList.remove("empty");
+          trendEl.innerHTML = renderTrend(trend.points);
+          tempEl.classList.remove("empty");
+          tempEl.innerHTML = renderTemperatureTrend(temp.points);
+          stressEl.classList.remove("empty");
+          stressEl.innerHTML = renderStressTrend(trend.points);
+          spo2El.classList.remove("empty");
+          spo2El.innerHTML = renderSpo2Trend(trend.points);
         } catch (error) {
           status.textContent = `Could not reach API: ${error.message}`;
+          backendState.textContent = "Offline";
           sleepEl.textContent = "Start the Python API and refresh this page.";
+          trendEl.classList.add("empty");
+          trendEl.textContent = "Chart unavailable until the API is running.";
+          tempEl.classList.add("empty");
+          tempEl.textContent = "Temperature chart unavailable until the API is running.";
+          stressEl.classList.add("empty");
+          stressEl.textContent = "Stress chart unavailable until the API is running.";
+          spo2El.classList.add("empty");
+          spo2El.textContent = "SpO2 chart unavailable until the API is running.";
         }
       }
 
+      document.getElementById("sync-button").addEventListener("click", triggerSync);
+      document.getElementById("refresh-button").addEventListener("click", loadDashboard);
       loadDashboard();
     </script>
   </body>

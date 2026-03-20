@@ -1,5 +1,5 @@
 use btleplug::api::ValueNotification;
-use chrono::{DateTime, Local, TimeDelta};
+use chrono::{DateTime, Local, TimeDelta, Utc};
 use openwhoop_entities::packets;
 use openwhoop_db::{DatabaseHandler, SearchHistory};
 use openwhoop_codec::{
@@ -36,6 +36,8 @@ pub struct OpenWhoop {
 }
 
 impl OpenWhoop {
+    const LIVE_EDGE_GRACE_PERIOD: TimeDelta = TimeDelta::minutes(3);
+
     pub fn new(database: DatabaseHandler) -> Self {
         let user_age = std::env::var("WHOOP_AGE")
             .ok()
@@ -111,6 +113,30 @@ impl OpenWhoop {
         }
 
         Ok(())
+    }
+
+    pub async fn flush_current_history_batch(&mut self) -> anyhow::Result<()> {
+        let readings = std::mem::take(&mut self.history_packets);
+        self.queue_history_write(readings).await
+    }
+
+    fn latest_history_unix(&self) -> Option<u64> {
+        self.history_packets
+            .last()
+            .map(|reading| reading.unix)
+            .or_else(|| self.last_history_packet.as_ref().map(|reading| reading.unix))
+    }
+
+    pub fn is_history_caught_up(&self) -> bool {
+        let Some(latest_unix) = self.latest_history_unix() else {
+            return false;
+        };
+
+        let Some(latest_time) = DateTime::from_timestamp_millis(i64::try_from(latest_unix).ok().unwrap_or_default()) else {
+            return false;
+        };
+
+        latest_time >= Utc::now() - Self::LIVE_EDGE_GRACE_PERIOD
     }
 
     async fn flush_oldest_history_write(&mut self) -> anyhow::Result<()> {
@@ -255,8 +281,7 @@ impl OpenWhoop {
                     debug!("WHOOP history transfer started");
                 }
                 MetadataType::HistoryEnd => {
-                    let readings = std::mem::take(&mut self.history_packets);
-                    self.queue_history_write(readings).await?;
+                    self.flush_current_history_batch().await?;
 
                     let packet = WhoopPacket::history_end(data);
                     return Ok(Some(packet));
@@ -406,8 +431,15 @@ impl OpenWhoop {
     }
 
     pub async fn calculate_spo2(&self) -> anyhow::Result<()> {
+        let mut previous_last = None;
+
         loop {
             let last = self.database.last_spo2_time().await?;
+            if last.is_some() && last == previous_last {
+                break;
+            }
+
+            previous_last = last;
             let options = SearchHistory {
                 from: last
                     .map(|t| t - TimeDelta::seconds(i64::try_from(SpO2Calculator::WINDOW_SIZE).unwrap_or(0))),
