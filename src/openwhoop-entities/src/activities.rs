@@ -7,8 +7,8 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
+    pub device_id: String,
     pub period_id: Date,
-    #[sea_orm(unique)]
     pub start: DateTime,
     pub end: DateTime,
     pub activity: String,
@@ -16,21 +16,6 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::sleep_cycles::Entity",
-        from = "Column::PeriodId",
-        to = "super::sleep_cycles::Column::SleepId",
-        on_update = "Cascade",
-        on_delete = "Cascade"
-    )]
-    SleepCycles,
-}
-
-impl Related<super::sleep_cycles::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::SleepCycles.def()
-    }
-}
+pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}

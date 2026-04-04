@@ -18,6 +18,7 @@ impl DatabaseHandler {
     pub async fn last_skin_temp_time(&self) -> anyhow::Result<Option<NaiveDateTime>> {
         let reading = heart_rate::Entity::find()
             .filter(heart_rate::Column::SkinTemp.is_not_null())
+            .filter(self.device_filter(heart_rate::Column::DeviceId))
             .order_by_desc(heart_rate::Column::Time)
             .select_only()
             .select_column(heart_rate::Column::Time)
@@ -35,6 +36,7 @@ impl DatabaseHandler {
         let limit = options.limit;
         let rows = heart_rate::Entity::find()
             .filter(options.conditions())
+            .filter(self.device_filter(heart_rate::Column::DeviceId))
             .filter(heart_rate::Column::SensorData.is_not_null())
             .filter(heart_rate::Column::SkinTemp.is_null())
             .limit(limit)
@@ -64,6 +66,7 @@ impl DatabaseHandler {
     pub async fn update_skin_temp_on_reading(&self, score: SkinTempScore) -> anyhow::Result<()> {
         let model = heart_rate::ActiveModel {
             id: NotSet,
+            device_id: NotSet,
             bpm: NotSet,
             time: Unchanged(score.time),
             rr_intervals: NotSet,
@@ -78,6 +81,7 @@ impl DatabaseHandler {
 
         heart_rate::Entity::update_many()
             .filter(heart_rate::Column::Time.eq(score.time))
+            .filter(self.device_filter(heart_rate::Column::DeviceId))
             .set(model)
             .exec(&self.db)
             .await?;
@@ -92,14 +96,18 @@ mod tests {
 
     #[tokio::test]
     async fn last_skin_temp_time_empty() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
         let result = db.last_skin_temp_time().await.unwrap();
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn search_temp_readings_empty() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
         let readings = db
             .search_temp_readings(SearchHistory::default())
             .await
@@ -109,7 +117,9 @@ mod tests {
 
     #[tokio::test]
     async fn search_temp_readings_ignores_invalid_raw_values() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let sensor = openwhoop_codec::SensorData {
             ppg_green: 100,
@@ -144,7 +154,9 @@ mod tests {
 
     #[tokio::test]
     async fn update_skin_temp_on_reading_integration() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let sensor = openwhoop_codec::SensorData {
             ppg_green: 100,

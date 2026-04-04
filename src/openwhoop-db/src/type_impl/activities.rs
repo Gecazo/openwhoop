@@ -13,6 +13,7 @@ impl DatabaseHandler {
     pub async fn create_activity(&self, activity: ActivityPeriod) -> anyhow::Result<()> {
         let model = activities::ActiveModel {
             id: NotSet,
+            device_id: Set(self.require_device_id()?.to_string()),
             period_id: Set(activity.period_id),
             start: Set(activity.from),
             end: Set(activity.to),
@@ -22,7 +23,7 @@ impl DatabaseHandler {
 
         activities::Entity::insert(model)
             .on_conflict(
-                OnConflict::column(activities::Column::Start)
+                OnConflict::columns([activities::Column::DeviceId, activities::Column::Start])
                     .update_column(activities::Column::End)
                     .update_column(activities::Column::Activity)
                     .to_owned(),
@@ -38,6 +39,7 @@ impl DatabaseHandler {
     ) -> anyhow::Result<Vec<ActivityPeriod>> {
         let activities = activities::Entity::find()
             .filter(search_activity_periods_query(options))
+            .filter(self.device_filter(activities::Column::DeviceId))
             .all(&self.db)
             .await?
             .into_iter()
@@ -49,6 +51,7 @@ impl DatabaseHandler {
 
     pub async fn get_latest_activity(&self) -> anyhow::Result<Option<ActivityPeriod>> {
         Ok(activities::Entity::find()
+            .filter(self.device_filter(activities::Column::DeviceId))
             .order_by_desc(activities::Column::End)
             .one(&self.db)
             .await?
@@ -95,6 +98,7 @@ mod tests {
     fn map_activity_period_converts() {
         let model = activities::Model {
             id: 1,
+            device_id: "device-a".to_string(),
             period_id: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
             start: NaiveDate::from_ymd_opt(2025, 1, 1)
                 .unwrap()
@@ -125,7 +129,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_and_search_activities() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         // Must create a sleep cycle first (FK constraint)
         let sleep_date = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
@@ -159,13 +165,17 @@ mod tests {
 
     #[tokio::test]
     async fn get_latest_activity_empty() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
         assert!(db.get_latest_activity().await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn get_latest_activity_returns_most_recent() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let sleep_date = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
         let sleep = openwhoop_algos::SleepCycle {

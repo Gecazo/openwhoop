@@ -7,8 +7,8 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
+    pub device_id: String,
     pub bpm: i16,
-    #[sea_orm(unique)]
     pub time: DateTime,
     #[sea_orm(column_type = "Text")]
     pub rr_intervals: String,

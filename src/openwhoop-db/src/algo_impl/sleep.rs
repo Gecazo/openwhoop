@@ -15,6 +15,7 @@ impl DatabaseHandler {
         Ok(sleep_cycles::Entity::find()
             .order_by_asc(sleep_cycles::Column::Start)
             .filter(filter)
+            .filter(self.device_filter(sleep_cycles::Column::DeviceId))
             .all(&self.db)
             .await?
             .into_iter()
@@ -49,6 +50,7 @@ mod tests {
     fn map_sleep_cycle_with_score() {
         let model = sleep_cycles::Model {
             id: uuid::Uuid::new_v4(),
+            device_id: "device-a".to_string(),
             sleep_id: NaiveDate::from_ymd_opt(2025, 1, 2).unwrap(),
             start: NaiveDate::from_ymd_opt(2025, 1, 1)
                 .unwrap()
@@ -78,6 +80,7 @@ mod tests {
     fn map_sleep_cycle_without_score_uses_calculated() {
         let model = sleep_cycles::Model {
             id: uuid::Uuid::new_v4(),
+            device_id: "device-a".to_string(),
             sleep_id: NaiveDate::from_ymd_opt(2025, 1, 2).unwrap(),
             start: NaiveDate::from_ymd_opt(2025, 1, 1)
                 .unwrap()
@@ -104,14 +107,18 @@ mod tests {
 
     #[tokio::test]
     async fn get_sleep_cycles_empty() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
         let cycles = db.get_sleep_cycles(None).await.unwrap();
         assert!(cycles.is_empty());
     }
 
     #[tokio::test]
     async fn get_sleep_cycles_returns_inserted() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let start = NaiveDate::from_ymd_opt(2025, 1, 1)
             .unwrap()
@@ -144,7 +151,9 @@ mod tests {
 
     #[tokio::test]
     async fn get_sleep_cycles_with_start_filter() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         // Insert two sleep cycles
         for day in [1, 3] {

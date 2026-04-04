@@ -48,21 +48,27 @@ uvicorn app.main:app --reload
 
 ## Getting Started
 
-First copy `.env.example` into `.env` and then scan for your Whoop device:
+First copy `.env.example` into `.env` and then scan for nearby WHOOP devices:
 ```sh
 cp .env.example .env
 cargo run -r -- scan
 ```
 
+The scanner now deduplicates nearby WHOOP advertisements, shows a numbered list, and prints a stable `WHOOP=...` value you can reuse later.
+
 After you find your device:
 
 - On Linux, copy its address to `.env` under `WHOOP`
-- On macOS, copy its name to `.env` under `WHOOP`
+- On macOS, copy its stable ID to `.env` under `WHOOP` for the most reliable matching
+- If `WHOOP` is not set, BLE device commands such as `download-history` will prompt you to choose from nearby WHOOP devices
+- Stats and analysis commands can be scoped to a specific device with the global `--whoop` flag, for example `cargo run -r -- --whoop <device-id> latest-sleep`
 
 Then download data from your Whoop:
 ```sh
 cargo run -r -- download-history
 ```
+
+Historical and derived data are now stored per device in the same database using a `device_id` column, so multiple WHOOP straps can coexist without overwriting each other.
 
 ## Commands
 

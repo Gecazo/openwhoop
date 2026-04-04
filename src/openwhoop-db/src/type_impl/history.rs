@@ -28,6 +28,7 @@ impl DatabaseHandler {
         let limit = options.limit;
         let history = heart_rate::Entity::find()
             .filter(options.conditions())
+            .filter(self.device_filter(heart_rate::Column::DeviceId))
             .limit(limit)
             .order_by_asc(heart_rate::Column::Time)
             .all(&self.db)
@@ -78,6 +79,7 @@ mod tests {
 
         let model = heart_rate::Model {
             id: 1,
+            device_id: "device-a".to_string(),
             bpm: 72,
             time,
             rr_intervals: "833,850".to_string(),
@@ -105,6 +107,7 @@ mod tests {
 
         let model = heart_rate::Model {
             id: 1,
+            device_id: "device-a".to_string(),
             bpm: 60,
             time,
             rr_intervals: "".to_string(),
@@ -141,6 +144,7 @@ mod tests {
 
         let model = heart_rate::Model {
             id: 1,
+            device_id: "device-a".to_string(),
             bpm: 70,
             time,
             rr_intervals: "800".to_string(),
@@ -161,7 +165,9 @@ mod tests {
 
     #[tokio::test]
     async fn search_history_integration() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let readings: Vec<openwhoop_codec::HistoryReading> = (0..3)
             .map(|i| openwhoop_codec::HistoryReading {

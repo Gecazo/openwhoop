@@ -12,6 +12,7 @@ impl DatabaseHandler {
     pub async fn last_stress_time(&self) -> anyhow::Result<Option<NaiveDateTime>> {
         let reading = heart_rate::Entity::find()
             .filter(heart_rate::Column::Stress.is_not_null())
+            .filter(self.device_filter(heart_rate::Column::DeviceId))
             .order_by_desc(heart_rate::Column::Time)
             .select_only()
             .select_column(heart_rate::Column::Time)
@@ -25,6 +26,7 @@ impl DatabaseHandler {
     pub async fn update_stress_on_reading(&self, stress: StressScore) -> anyhow::Result<()> {
         let model = heart_rate::ActiveModel {
             id: NotSet,
+            device_id: NotSet,
             bpm: NotSet,
             time: Unchanged(stress.time),
             rr_intervals: NotSet,
@@ -39,6 +41,7 @@ impl DatabaseHandler {
 
         heart_rate::Entity::update_many()
             .filter(heart_rate::Column::Time.eq(stress.time))
+            .filter(self.device_filter(heart_rate::Column::DeviceId))
             .set(model)
             .exec(&self.db)
             .await?;
@@ -53,14 +56,18 @@ mod tests {
 
     #[tokio::test]
     async fn last_stress_time_empty() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
         let result = db.last_stress_time().await.unwrap();
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn update_stress_on_reading_integration() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let reading = openwhoop_codec::HistoryReading {
             unix: 1735689600000,

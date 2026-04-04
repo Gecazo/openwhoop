@@ -2,7 +2,7 @@ use chrono::{Local, NaiveDateTime, TimeZone};
 use openwhoop_entities::{packets, sleep_cycles};
 use openwhoop_migration::{Migrator, MigratorTrait, OnConflict};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, ConnectOptions, Database,
+    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, Condition, ConnectOptions, Database,
     DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use uuid::Uuid;
@@ -13,11 +13,39 @@ use openwhoop_codec::HistoryReading;
 #[derive(Clone)]
 pub struct DatabaseHandler {
     pub(crate) db: DatabaseConnection,
+    device_id: Option<String>,
 }
 
 impl DatabaseHandler {
     pub fn connection(&self) -> &DatabaseConnection {
         &self.db
+    }
+
+    pub fn with_device_id(&self, device_id: Option<String>) -> Self {
+        Self {
+            db: self.db.clone(),
+            device_id,
+        }
+    }
+
+    pub fn current_device_id(&self) -> Option<&str> {
+        self.device_id.as_deref()
+    }
+
+    pub(crate) fn require_device_id(&self) -> anyhow::Result<&str> {
+        self.current_device_id()
+            .ok_or_else(|| anyhow::anyhow!("WHOOP device id is required for device-scoped data"))
+    }
+
+    pub(crate) fn device_filter<C>(&self, column: C) -> Condition
+    where
+        C: ColumnTrait,
+    {
+        let mut condition = Condition::all();
+        if let Some(device_id) = self.current_device_id() {
+            condition = condition.add(column.eq(device_id.to_string()));
+        }
+        condition
     }
 
     pub async fn new<C>(path: C) -> Self
@@ -32,7 +60,10 @@ impl DatabaseHandler {
             .await
             .expect("Error running migrations");
 
-        Self { db }
+        Self {
+            db,
+            device_id: None,
+        }
     }
 
     pub async fn create_packet(
@@ -42,6 +73,7 @@ impl DatabaseHandler {
     ) -> anyhow::Result<openwhoop_entities::packets::Model> {
         let packet = openwhoop_entities::packets::ActiveModel {
             id: NotSet,
+            device_id: Set(self.require_device_id()?.to_string()),
             uuid: Set(char),
             bytes: Set(data),
         };
@@ -61,6 +93,7 @@ impl DatabaseHandler {
 
         let packet = openwhoop_entities::heart_rate::ActiveModel {
             id: NotSet,
+            device_id: Set(self.require_device_id()?.to_string()),
             bpm: Set(i16::from(reading.bpm)),
             time: Set(time),
             rr_intervals: Set(rr_to_string(reading.rr)),
@@ -75,7 +108,10 @@ impl DatabaseHandler {
 
         let _model = openwhoop_entities::heart_rate::Entity::insert(packet)
             .on_conflict(
-                OnConflict::column(openwhoop_entities::heart_rate::Column::Time)
+                OnConflict::columns([
+                    openwhoop_entities::heart_rate::Column::DeviceId,
+                    openwhoop_entities::heart_rate::Column::Time,
+                ])
                     .update_column(openwhoop_entities::heart_rate::Column::Bpm)
                     .update_column(openwhoop_entities::heart_rate::Column::RrIntervals)
                     .update_column(openwhoop_entities::heart_rate::Column::SensorData)
@@ -91,6 +127,7 @@ impl DatabaseHandler {
         if readings.is_empty() {
             return Ok(());
         }
+        let device_id = self.require_device_id()?.to_string();
         let payloads = readings
             .into_iter()
             .map(|r| {
@@ -102,6 +139,7 @@ impl DatabaseHandler {
                     .transpose()?;
                 Ok(openwhoop_entities::heart_rate::ActiveModel {
                     id: NotSet,
+                    device_id: Set(device_id.clone()),
                     bpm: Set(i16::from(r.bpm)),
                     time: Set(time),
                     rr_intervals: Set(rr_to_string(r.rr)),
@@ -123,7 +161,10 @@ impl DatabaseHandler {
         for chunk in payloads.chunks(90) {
             openwhoop_entities::heart_rate::Entity::insert_many(chunk.to_vec())
                 .on_conflict(
-                    OnConflict::column(openwhoop_entities::heart_rate::Column::Time)
+                    OnConflict::columns([
+                        openwhoop_entities::heart_rate::Column::DeviceId,
+                        openwhoop_entities::heart_rate::Column::Time,
+                    ])
                         .update_column(openwhoop_entities::heart_rate::Column::Bpm)
                         .update_column(openwhoop_entities::heart_rate::Column::RrIntervals)
                         .update_column(openwhoop_entities::heart_rate::Column::SensorData)
@@ -141,6 +182,7 @@ impl DatabaseHandler {
     pub async fn get_packets(&self, id: i32) -> anyhow::Result<Vec<packets::Model>> {
         let stream = packets::Entity::find()
             .filter(packets::Column::Id.gt(id))
+            .filter(self.device_filter(packets::Column::DeviceId))
             .order_by_asc(packets::Column::Id)
             .limit(10_000)
             .all(&self.db)
@@ -153,6 +195,7 @@ impl DatabaseHandler {
         &self,
     ) -> anyhow::Result<Option<openwhoop_entities::sleep_cycles::Model>> {
         let sleep = sleep_cycles::Entity::find()
+            .filter(self.device_filter(sleep_cycles::Column::DeviceId))
             .order_by_desc(sleep_cycles::Column::End)
             .one(&self.db)
             .await?;
@@ -163,6 +206,7 @@ impl DatabaseHandler {
     pub async fn create_sleep(&self, sleep: SleepCycle) -> anyhow::Result<()> {
         let model = sleep_cycles::ActiveModel {
             id: Set(Uuid::new_v4()),
+            device_id: Set(self.require_device_id()?.to_string()),
             sleep_id: Set(sleep.id),
             start: Set(sleep.start),
             end: Set(sleep.end),
@@ -178,7 +222,10 @@ impl DatabaseHandler {
 
         let _r = sleep_cycles::Entity::insert(model)
             .on_conflict(
-                OnConflict::column(sleep_cycles::Column::SleepId)
+                OnConflict::columns([
+                    sleep_cycles::Column::DeviceId,
+                    sleep_cycles::Column::SleepId,
+                ])
                     .update_columns([
                         sleep_cycles::Column::Start,
                         sleep_cycles::Column::End,
@@ -218,7 +265,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_and_get_packets() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
         let uuid = Uuid::new_v4();
         let data = vec![0xAA, 0xBB, 0xCC];
 
@@ -233,7 +282,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_reading_and_search_history() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let reading = HistoryReading {
             unix: 1735689600000, // 2025-01-01 00:00:00 UTC in millis
@@ -256,7 +307,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_readings_batch() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let readings: Vec<HistoryReading> = (0..5)
             .map(|i| HistoryReading {
@@ -279,7 +332,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_and_get_sleep() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let start = chrono::NaiveDate::from_ymd_opt(2025, 1, 1)
             .unwrap()
@@ -314,7 +369,9 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_reading_on_conflict() {
-        let db = DatabaseHandler::new("sqlite::memory:").await;
+        let db = DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let reading = HistoryReading {
             unix: 1735689600000,

@@ -11,9 +11,9 @@ use sea_orm::{
 };
 
 // SQLite limits to 999 SQL variables, so batch sizes must respect:
-// heart_rate: 10 Set columns -> max 99 rows
-// sleep_cycles: 11 Set columns -> max 90 rows
-// activities: 4 Set columns -> max 249 rows
+// heart_rate: 12 Set columns -> max 83 rows
+// sleep_cycles: 12 Set columns -> max 83 rows
+// activities: 6 Set columns -> max 166 rows
 const HEART_RATE_BATCH: u64 = 90;
 const SLEEP_CYCLES_BATCH: u64 = 80;
 const ACTIVITIES_BATCH: u64 = 160;
@@ -125,9 +125,10 @@ impl<'a> DatabaseSync<'a> {
             let batch_len = u64::try_from(rows.len())?;
 
             // Deduplicate by sleep_id
-            let mut deduped: HashMap<chrono::NaiveDate, sleep_cycles::Model> = HashMap::new();
+            let mut deduped: HashMap<(String, chrono::NaiveDate), sleep_cycles::Model> =
+                HashMap::new();
             for row in &rows {
-                deduped.insert(row.sleep_id, row.clone());
+                deduped.insert((row.device_id.clone(), row.sleep_id), row.clone());
             }
 
             let ids: Vec<_> = deduped.values().map(|m| m.id).collect();
@@ -136,6 +137,7 @@ impl<'a> DatabaseSync<'a> {
                 .into_values()
                 .map(|m| sleep_cycles::ActiveModel {
                     id: Set(m.id),
+                    device_id: Set(m.device_id),
                     sleep_id: Set(m.sleep_id),
                     start: Set(m.start),
                     end: Set(m.end),
@@ -154,7 +156,10 @@ impl<'a> DatabaseSync<'a> {
 
             sleep_cycles::Entity::insert_many(models)
                 .on_conflict(
-                    OnConflict::column(sleep_cycles::Column::SleepId)
+                    OnConflict::columns([
+                        sleep_cycles::Column::DeviceId,
+                        sleep_cycles::Column::SleepId,
+                    ])
                         .update_columns([
                             sleep_cycles::Column::Start,
                             sleep_cycles::Column::End,
@@ -231,9 +236,10 @@ impl<'a> DatabaseSync<'a> {
             let batch_len = u64::try_from(rows.len())?;
 
             // Deduplicate by start
-            let mut deduped: HashMap<chrono::NaiveDateTime, activities::Model> = HashMap::new();
+            let mut deduped: HashMap<(String, chrono::NaiveDateTime), activities::Model> =
+                HashMap::new();
             for row in &rows {
-                deduped.insert(row.start, row.clone());
+                deduped.insert((row.device_id.clone(), row.start), row.clone());
             }
 
             let ids: Vec<_> = deduped.values().map(|m| m.id).collect();
@@ -242,6 +248,7 @@ impl<'a> DatabaseSync<'a> {
                 .into_values()
                 .map(|m| activities::ActiveModel {
                     id: NotSet,
+                    device_id: Set(m.device_id),
                     period_id: Set(m.period_id),
                     start: Set(m.start),
                     end: Set(m.end),
@@ -254,7 +261,7 @@ impl<'a> DatabaseSync<'a> {
 
             activities::Entity::insert_many(models)
                 .on_conflict(
-                    OnConflict::column(activities::Column::Start)
+                    OnConflict::columns([activities::Column::DeviceId, activities::Column::Start])
                         .update_columns([
                             activities::Column::End,
                             activities::Column::Activity,
@@ -322,9 +329,10 @@ impl<'a> DatabaseSync<'a> {
             let batch_len = u64::try_from(rows.len())?;
 
             // Deduplicate by time
-            let mut deduped: HashMap<chrono::NaiveDateTime, heart_rate::Model> = HashMap::new();
+            let mut deduped: HashMap<(String, chrono::NaiveDateTime), heart_rate::Model> =
+                HashMap::new();
             for row in &rows {
-                deduped.insert(row.time, row.clone());
+                deduped.insert((row.device_id.clone(), row.time), row.clone());
             }
 
             let ids: Vec<_> = deduped.values().map(|m| m.id).collect();
@@ -333,6 +341,7 @@ impl<'a> DatabaseSync<'a> {
                 .into_values()
                 .map(|m| heart_rate::ActiveModel {
                     id: NotSet,
+                    device_id: Set(m.device_id),
                     bpm: Set(m.bpm),
                     time: Set(m.time),
                     rr_intervals: Set(m.rr_intervals),
@@ -350,7 +359,10 @@ impl<'a> DatabaseSync<'a> {
 
             heart_rate::Entity::insert_many(models)
                 .on_conflict(
-                    OnConflict::column(heart_rate::Column::Time)
+                    OnConflict::columns([
+                        heart_rate::Column::DeviceId,
+                        heart_rate::Column::Time,
+                    ])
                         .update_columns([
                             heart_rate::Column::Bpm,
                             heart_rate::Column::RrIntervals,
@@ -433,8 +445,12 @@ mod tests {
 
     #[tokio::test]
     async fn sync_heart_rate_between_databases() {
-        let db1 = crate::DatabaseHandler::new("sqlite::memory:").await;
-        let db2 = crate::DatabaseHandler::new("sqlite::memory:").await;
+        let db1 = crate::DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
+        let db2 = crate::DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         // Insert readings into db1
         for i in 0..5 {
@@ -463,8 +479,12 @@ mod tests {
 
     #[tokio::test]
     async fn sync_sleep_cycles_between_databases() {
-        let db1 = crate::DatabaseHandler::new("sqlite::memory:").await;
-        let db2 = crate::DatabaseHandler::new("sqlite::memory:").await;
+        let db1 = crate::DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
+        let db2 = crate::DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         let start = chrono::NaiveDate::from_ymd_opt(2025, 1, 1)
             .unwrap()
@@ -502,8 +522,12 @@ mod tests {
 
     #[tokio::test]
     async fn sync_idempotent() {
-        let db1 = crate::DatabaseHandler::new("sqlite::memory:").await;
-        let db2 = crate::DatabaseHandler::new("sqlite::memory:").await;
+        let db1 = crate::DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
+        let db2 = crate::DatabaseHandler::new("sqlite::memory:")
+            .await
+            .with_device_id(Some("device-a".to_string()));
 
         // Insert a reading
         db1.create_reading(openwhoop_codec::HistoryReading {

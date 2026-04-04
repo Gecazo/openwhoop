@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use btleplug::{
-    api::{Central, CharPropFlags, Characteristic, Peripheral as _, WriteType},
+    api::{Central, CharPropFlags, Characteristic, Peripheral as _, Service, WriteType},
     platform::{Adapter, Peripheral},
 };
 use openwhoop_entities::packets::Model;
@@ -51,10 +51,16 @@ impl WhoopDevice {
     }
 
     pub async fn connect(&mut self) -> anyhow::Result<()> {
+        println!("Stage: connect -> starting");
+        info!("Connecting to peripheral...");
         timeout(Self::CONNECT_TIMEOUT, self.peripheral.connect())
             .await
             .map_err(|_| anyhow!("Timed out after {}s connecting to WHOOP", Self::CONNECT_TIMEOUT.as_secs()))??;
+        println!("Stage: connect -> connected");
+        info!("Peripheral connection established");
         let _ = self.adapter.stop_scan().await;
+        println!("Stage: discover_services -> starting");
+        info!("Discovering WHOOP services...");
         timeout(
             Self::DISCOVER_SERVICES_TIMEOUT,
             self.peripheral.discover_services(),
@@ -66,6 +72,9 @@ impl WhoopDevice {
                 Self::DISCOVER_SERVICES_TIMEOUT.as_secs()
             )
         })??;
+        let services = self.peripheral.services();
+        println!("Stage: discover_services -> found {} services", services.len());
+        info!("Discovered {} services", services.len());
         self.whoop.packet_buffer.clear();
         Ok(())
     }
@@ -85,27 +94,40 @@ impl WhoopDevice {
     }
 
     async fn subscribe(&self, char: Uuid) -> anyhow::Result<()> {
+        debug!("Subscribing to characteristic {}", char);
         self.peripheral.subscribe(&Self::create_char(char)).await?;
         Ok(())
     }
 
     pub async fn initialize(&mut self) -> anyhow::Result<()> {
+        println!("Stage: subscribe -> starting");
+        info!("Subscribing to WHOOP notification characteristics...");
         self.subscribe(DATA_FROM_STRAP).await?;
         self.subscribe(CMD_FROM_STRAP).await?;
         self.subscribe(EVENTS_FROM_STRAP).await?;
         self.subscribe(MEMFAULT).await?;
+        println!("Stage: subscribe -> ready");
 
+        println!("Stage: initialize -> sending bootstrap commands");
+        info!("Sending WHOOP initialization commands...");
+        println!("Stage: initialize -> hello_harvard");
         self.send_command(WhoopPacket::hello_harvard()).await?;
+        println!("Stage: initialize -> set_time");
         self.send_command(WhoopPacket::set_time()?).await?;
+        println!("Stage: initialize -> get_name");
         self.send_command(WhoopPacket::get_name()).await?;
 
+        println!("Stage: initialize -> entering high frequency sync");
+        info!("Entering high-frequency sync mode...");
         self.send_command(WhoopPacket::enter_high_freq_sync())
             .await?;
+        println!("Stage: initialize -> complete");
         Ok(())
     }
 
     pub async fn send_command(&mut self, packet: WhoopPacket) -> anyhow::Result<()> {
         let packet = packet.framed_packet()?;
+        trace!("Writing WHOOP command ({} bytes)", packet.len());
         self.peripheral
             .write(
                 &Self::create_char(CMD_TO_STRAP),
@@ -117,10 +139,17 @@ impl WhoopDevice {
     }
 
     pub async fn sync_history(&mut self, should_exit: Arc<AtomicBool>) -> anyhow::Result<()> {
+        println!("Stage: notifications -> opening stream");
+        info!("Subscribing to WHOOP notifications stream...");
         let mut notifications = self.peripheral.notifications().await?;
+        println!("Stage: notifications -> stream ready");
 
         info!("Starting WHOOP history sync...");
         self.send_command(WhoopPacket::history_start()).await?;
+        println!("Stage: history_start -> sent");
+        info!("Sent history_start command, waiting for notifications...");
+        let mut notification_count = 0usize;
+        let mut first_notification_logged = false;
 
         'a: loop {
             if should_exit.load(Ordering::SeqCst) {
@@ -155,9 +184,35 @@ impl WhoopDevice {
                     }
                 },
                 Some(notification) = notification => {
+                    notification_count += 1;
+                    if !first_notification_logged {
+                        println!(
+                            "Stage: notifications -> first packet on {} ({} bytes)",
+                            notification.uuid,
+                            notification.value.len()
+                        );
+                        first_notification_logged = true;
+                    } else if notification_count <= 5 {
+                        println!(
+                            "Stage: notifications -> packet {} on {} ({} bytes)",
+                            notification_count,
+                            notification.uuid,
+                            notification.value.len()
+                        );
+                    }
                     let packet = match self.debug_packets {
                         true => self.whoop.store_packet(notification).await?,
-                        false => Model { id: 0, uuid: notification.uuid, bytes: notification.value },
+                        false => Model {
+                            id: 0,
+                            device_id: self
+                                .whoop
+                                .database
+                                .current_device_id()
+                                .unwrap_or("unknown")
+                                .to_string(),
+                            uuid: notification.uuid,
+                            bytes: notification.value,
+                        },
                     };
 
                     if let Some(packet) = self.whoop.handle_packet(packet).await?{
@@ -170,6 +225,46 @@ impl WhoopDevice {
         self.whoop.flush_pending_history_writes().await?;
 
         info!("History sync loop finished");
+        Ok(())
+    }
+
+    pub async fn disconnect(&mut self) -> anyhow::Result<()> {
+        if self.peripheral.is_connected().await? {
+            println!("Stage: disconnect -> starting");
+            self.peripheral.disconnect().await?;
+            println!("Stage: disconnect -> complete");
+        }
+
+        Ok(())
+    }
+
+    pub async fn probe(&mut self) -> anyhow::Result<()> {
+        self.connect().await?;
+
+        let services = self.peripheral.services().into_iter().collect::<Vec<_>>();
+        print_services(&services);
+
+        println!("Stage: notifications_probe -> subscribing");
+        self.subscribe(DATA_FROM_STRAP).await?;
+        self.subscribe(CMD_FROM_STRAP).await?;
+        self.subscribe(EVENTS_FROM_STRAP).await?;
+        self.subscribe(MEMFAULT).await?;
+        println!("Stage: notifications_probe -> subscribed");
+
+        println!("Stage: notifications_probe -> opening stream");
+        let _notifications = timeout(Duration::from_secs(5), self.peripheral.notifications())
+            .await
+            .map_err(|_| anyhow!("Timed out after 5s opening notifications stream"))??;
+        println!("Stage: notifications_probe -> stream ready");
+
+        println!("Stage: command_probe -> get_name");
+        self.send_command(WhoopPacket::get_name()).await?;
+
+        println!("Stage: command_probe -> version");
+        self.send_command(WhoopPacket::version()).await?;
+
+        println!("Probe completed successfully");
+        self.disconnect().await?;
         Ok(())
     }
 
@@ -213,5 +308,18 @@ impl WhoopDevice {
 
         info!("Post-sync processing completed");
         Ok(())
+    }
+}
+
+fn print_services(services: &[Service]) {
+    println!("Discovered services and characteristics:");
+    for service in services {
+        println!("  Service {}", service.uuid);
+        for characteristic in &service.characteristics {
+            println!(
+                "    Characteristic {} ({:?})",
+                characteristic.uuid, characteristic.properties
+            );
+        }
     }
 }

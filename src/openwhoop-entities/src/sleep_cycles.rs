@@ -7,7 +7,7 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    #[sea_orm(unique)]
+    pub device_id: String,
     pub sleep_id: Date,
     pub start: DateTime,
     pub end: DateTime,
@@ -23,15 +23,6 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(has_many = "super::activities::Entity")]
-    Activities,
-}
-
-impl Related<super::activities::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Activities.def()
-    }
-}
+pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}

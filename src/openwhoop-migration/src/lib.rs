@@ -12,6 +12,7 @@ mod m20250601_000000_add_synced;
 mod m20250602_000000_sensor_data;
 mod m20250602_000001_spo2;
 mod m20250603_000000_skin_temp;
+mod m20260404_000000_device_scoped_data;
 
 pub struct Migrator;
 
@@ -31,6 +32,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250602_000000_sensor_data::Migration),
             Box::new(m20250602_000001_spo2::Migration),
             Box::new(m20250603_000000_skin_temp::Migration),
+            Box::new(m20260404_000000_device_scoped_data::Migration),
         ]
     }
 }
